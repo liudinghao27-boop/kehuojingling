@@ -15,6 +15,13 @@ const stats = [
   { label: "今日获客", value: "12", change: "+3", changeType: "positive", icon: "✅", color: "purple" },
 ];
 
+const colorClasses: Record<string, string> = {
+  blue: "bg-blue-100",
+  green: "bg-green-100",
+  red: "bg-red-100",
+  purple: "bg-purple-100",
+};
+
 const recentVideos = [
   { id: "1", title: "花艺教程：玫瑰包装技巧", platform: "抖音", views: "1.2万", status: "MONITORING", comments: 234, highIntent: 12, replied: 8, dmSent: 3 },
   { id: "2", title: "新手开店：花店选址攻略", platform: "抖音", views: "8,500", status: "MONITORING", comments: 156, highIntent: 8, replied: 5, dmSent: 2 },
@@ -51,7 +58,7 @@ export default function DashboardPage() {
               className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
             >
               <div className="flex items-center justify-between">
-                <div className={`w-12 h-12 rounded-lg bg-${stat.color}-100 flex items-center justify-center text-2xl`}>
+                <div className={`w-12 h-12 rounded-lg ${colorClasses[stat.color]} flex items-center justify-center text-2xl`}>
                   {stat.icon}
                 </div>
                 <span
@@ -59,7 +66,7 @@ export default function DashboardPage() {
                     stat.changeType === "positive"
                       ? "bg-green-100 text-green-700"
                       : stat.changeType === "warning"
-                      ? "bg-red-100 text-red-700"
+                      ? "bg-yellow-100 text-yellow-700"
                       : "bg-gray-100 text-gray-700"
                   }`}
                 >
@@ -104,9 +111,11 @@ export default function DashboardPage() {
                           {video.platform} · {video.views}播放 · 评论 {video.comments} · 高意向 {video.highIntent} · 已回复 {video.replied} · 已私信 {video.dmSent}
                         </div>
                       </div>
-                      <Link href={`/dashboard/comments?videoId=${video.id}`} className="ml-4 flex-shrink-0">
-                        <Button size="sm">查看评论</Button>
-                      </Link>
+                      <div className="ml-4 flex-shrink-0">
+                        <Link href={`/dashboard/comments?videoId=${video.id}`}>
+                          <Button size="sm">查看评论</Button>
+                        </Link>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -132,11 +141,11 @@ export default function DashboardPage() {
                   {highIntentUsers.map((user) => (
                     <div
                       key={user.id}
-                      className="flex items-start justify-between p-4 bg-gray-50 rounded-xl"
+                      className="flex items-start justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-medium">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-medium">
                             {user.avatar}
                           </div>
                           <div>
@@ -209,17 +218,17 @@ export default function DashboardPage() {
               <CardHeader title="快捷操作" />
               <CardBody>
                 <div className="space-y-3">
-                  <Link href="/dashboard/videos">
+                  <Link href="/dashboard/videos" className="block w-full">
                     <Button className="w-full justify-start" variant="secondary">
                       <span className="mr-2">🎥</span> 添加监控视频
                     </Button>
                   </Link>
-                  <Link href="/dashboard/templates">
+                  <Link href="/dashboard/templates" className="block w-full">
                     <Button className="w-full justify-start" variant="secondary">
                       <span className="mr-2">📝</span> 管理话术模板
                     </Button>
                   </Link>
-                  <Link href="/dashboard/analytics">
+                  <Link href="/dashboard/analytics" className="block w-full">
                     <Button className="w-full justify-start" variant="secondary">
                       <span className="mr-2">📊</span> 查看数据报表
                     </Button>
