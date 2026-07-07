@@ -160,6 +160,18 @@ export function analyzeIntentLocal(comment: string): IntentAnalysis {
     }
   }
   
+  // 检查购买意向（单独处理）
+  if (score < 5) {
+    const buyPatterns = ['哪里买', '在哪买', '怎么买', '如何购买', '想买', '购买', '买到'];
+    for (const p of buyPatterns) {
+      if (text.includes(p)) {
+        score = Math.max(score, 4);
+        keywords.push(p);
+        category = 'purchase';
+      }
+    }
+  }
+  
   // 检查高意向
   if (score < 5) {
     for (const kw of highKeywords) {
