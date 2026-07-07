@@ -1,10 +1,6 @@
 "use client";
 
 import { Navbar } from "@/components/layout/Navbar";
-import { Card, CardHeader, CardBody } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
@@ -35,83 +31,127 @@ function CommentsContent() {
   const handleReply = (id: string) => { setComments(comments.map((c) => c.id === id ? { ...c, status: "REPLIED" } : c)); addToast("回复已发送", "success"); };
   const handleDM = (id: string) => { setComments(comments.map((c) => c.id === id ? { ...c, status: "DM_SENT" } : c)); addToast("私信已发送", "success"); };
 
-  const getIntentBadge = (score: number) => {
-    if (score >= 5) return <Badge variant="danger">强意向 {score}分</Badge>;
-    if (score >= 4) return <Badge variant="warning">高意向 {score}分</Badge>;
-    if (score >= 3) return <Badge variant="info">中意向 {score}分</Badge>;
-    return <Badge>低意向 {score}分</Badge>;
+  const getIntentStyle = (score: number) => {
+    if (score >= 5) return "bg-red-50 text-red-700";
+    if (score >= 4) return "bg-amber-50 text-amber-700";
+    if (score >= 3) return "bg-blue-50 text-blue-700";
+    return "bg-gray-50 text-gray-500";
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusStyle = (status: string) => {
     switch (status) {
-      case "NEW": return <Badge>新评论</Badge>;
-      case "ANALYZED": return <Badge variant="info">已分析</Badge>;
-      case "REPLIED": return <Badge variant="success">已回复</Badge>;
-      case "DM_SENT": return <Badge variant="success">已私信</Badge>;
-      case "CONVERTED": return <Badge variant="success">已转化</Badge>;
-      default: return <Badge>{status}</Badge>;
+      case "NEW": return "bg-gray-50 text-gray-600";
+      case "ANALYZED": return "bg-blue-50 text-blue-700";
+      case "REPLIED": return "bg-green-50 text-green-700";
+      case "DM_SENT": return "bg-green-50 text-green-700";
+      case "CONVERTED": return "bg-green-50 text-green-700";
+      default: return "bg-gray-50 text-gray-600";
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case "NEW": return "新评论";
+      case "ANALYZED": return "已分析";
+      case "REPLIED": return "已回复";
+      case "DM_SENT": return "已私信";
+      case "CONVERTED": return "已转化";
+      default: return status;
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-white">
       <Navbar />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">评论列表</h1>
-          <p className="mt-1 text-sm text-gray-500">{videoId ? "查看指定视频的评论区" : "所有监控视频的评论区"}</p>
+      <main className="max-w-5xl mx-auto px-6 lg:px-8 pt-24 pb-32">
+        <div className="mb-16">
+          <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">评论列表</h1>
+          <p className="mt-2 text-base text-gray-400">{videoId ? "查看指定视频的评论区" : "所有监控视频的评论区"}</p>
         </div>
 
         {/* Filter Bar */}
-        <Card className="mb-8">
-          <CardBody>
-            <div className="flex flex-col sm:flex-row gap-4 items-end">
-              <div className="flex-1 w-full">
-                <Input placeholder="搜索评论内容或用户名" value={search} onChange={(e) => setSearch(e.target.value)} />
-              </div>
-              <div className="flex gap-2">
-                <Button variant={filter === "all" ? "primary" : "ghost"} size="sm" onClick={() => setFilter("all")}>全部</Button>
-                <Button variant={filter === "high" ? "primary" : "ghost"} size="sm" onClick={() => setFilter("high")}>高意向</Button>
-                <Button variant={filter === "new" ? "primary" : "ghost"} size="sm" onClick={() => setFilter("new")}>新评论</Button>
-              </div>
+        <div className="bg-gray-50 rounded-3xl p-6 mb-10">
+          <div className="flex flex-col sm:flex-row gap-4 items-end">
+            <div className="flex-1 w-full">
+              <input
+                type="text"
+                placeholder="搜索评论内容或用户名"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="block w-full rounded-2xl bg-white border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200 transition-all"
+              />
             </div>
-          </CardBody>
-        </Card>
-
-        {/* Comments List */}
-        <Card>
-          <CardHeader title={`评论 (${filteredComments.length})`} action={<Button variant="ghost" size="sm" onClick={() => addToast("已抓取最新评论", "success")}>抓取最新</Button>} />
-          <CardBody>
-            <div className="space-y-4">
-              {filteredComments.map((comment) => (
-                <div key={comment.id} className="flex flex-col sm:flex-row sm:items-start justify-between p-4 bg-gray-50 rounded-xl gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-medium">{comment.authorName[0]}</div>
-                      <span className="font-medium text-gray-900">{comment.authorName}</span>
-                      {getIntentBadge(comment.intentScore)}
-                      {getStatusBadge(comment.status)}
-                    </div>
-                    <div className="mt-2 text-sm text-gray-700 bg-white p-3 rounded-lg border border-gray-100">&ldquo;{comment.content}&rdquo;</div>
-                    <div className="mt-2 flex items-center gap-4 text-xs text-gray-500 flex-wrap">
-                      <span>视频: {comment.videoTitle}</span>
-                      <span>关键词: {comment.intentKeywords.join(", ")}</span>
-                      <span>{comment.createdAt}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {comment.status === "NEW" || comment.status === "ANALYZED" ? (
-                      <>
-                        <Button size="sm" onClick={() => handleReply(comment.id)}>回复</Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDM(comment.id)}>私信</Button>
-                      </>
-                    ) : <Button variant="ghost" size="sm" disabled>已处理</Button>}
-                  </div>
-                </div>
+            <div className="flex gap-2">
+              {(["all", "high", "new"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`px-5 py-2.5 text-sm font-medium rounded-full transition-all active:scale-95 ${
+                    filter === f
+                      ? "bg-gray-900 text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {f === "all" ? "全部" : f === "high" ? "高意向" : "新评论"}
+                </button>
               ))}
             </div>
-          </CardBody>
-        </Card>
+          </div>
+        </div>
+
+        {/* Comments List */}
+        <div className="bg-gray-50 rounded-3xl p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-medium text-gray-900">评论</h2>
+            <span className="text-sm text-gray-400">{filteredComments.length} 条</span>
+          </div>
+          <div className="space-y-3">
+            {filteredComments.map((comment) => (
+              <div key={comment.id} className="flex flex-col sm:flex-row sm:items-start justify-between p-5 bg-white rounded-2xl gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-sm font-medium">
+                      {comment.authorName[0]}
+                    </div>
+                    <span className="font-medium text-gray-900">{comment.authorName}</span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getIntentStyle(comment.intentScore)}`}>
+                      {comment.intentScore >= 5 ? "强意向" : comment.intentScore >= 4 ? "高意向" : comment.intentScore >= 3 ? "中意向" : "低意向"} {comment.intentScore}分
+                    </span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusStyle(comment.status)}`}>
+                      {getStatusLabel(comment.status)}
+                    </span>
+                  </div>
+                  <div className="mt-3 text-sm text-gray-700 bg-gray-50 p-4 rounded-2xl">&ldquo;{comment.content}&rdquo;</div>
+                  <div className="mt-3 flex items-center gap-4 text-xs text-gray-400 flex-wrap">
+                    <span>{comment.videoTitle}</span>
+                    <span>关键词: {comment.intentKeywords.join(", ")}</span>
+                    <span>{comment.createdAt}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {comment.status === "NEW" || comment.status === "ANALYZED" ? (
+                    <>
+                      <button
+                        onClick={() => handleReply(comment.id)}
+                        className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 active:scale-95 transition-all"
+                      >
+                        回复
+                      </button>
+                      <button
+                        onClick={() => handleDM(comment.id)}
+                        className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-full hover:bg-gray-200 active:scale-95 transition-all"
+                      >
+                        私信
+                      </button>
+                    </>
+                  ) : (
+                    <span className="px-4 py-2 text-sm font-medium text-gray-400 bg-gray-100 rounded-full">已处理</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </main>
     </div>
   );
@@ -119,7 +159,11 @@ function CommentsContent() {
 
 export default function CommentsPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}>
+    <Suspense fallback={
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-gray-200 border-t-gray-900 animate-spin" />
+      </div>
+    }>
       <CommentsContent />
     </Suspense>
   );

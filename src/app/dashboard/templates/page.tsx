@@ -1,10 +1,6 @@
 "use client";
 
 import { Navbar } from "@/components/layout/Navbar";
-import { Card, CardHeader, CardBody } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { useState } from "react";
 
@@ -55,71 +51,138 @@ export default function TemplatesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-white">
       <Navbar />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">话术管理</h1>
-          <p className="mt-1 text-sm text-gray-500">管理评论回复和私信的话术模板</p>
+      <main className="max-w-5xl mx-auto px-6 lg:px-8 pt-24 pb-32">
+        <div className="mb-16">
+          <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">话术管理</h1>
+          <p className="mt-2 text-base text-gray-400">管理评论回复和私信的话术模板</p>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6">
-          <Button variant={activeTab === "reply" ? "primary" : "ghost"} onClick={() => { setActiveTab("reply"); setIsEditing(false); }}>评论回复话术 ({replyTemplates.length})</Button>
-          <Button variant={activeTab === "dm" ? "primary" : "ghost"} onClick={() => { setActiveTab("dm"); setIsEditing(false); }}>私信话术 ({dmTemplates.length})</Button>
+        <div className="flex gap-2 mb-10">
+          {(["reply", "dm"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => { setActiveTab(tab); setIsEditing(false); }}
+              className={`px-6 py-3 text-sm font-medium rounded-full transition-all active:scale-95 ${
+                activeTab === tab
+                  ? "bg-gray-900 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {tab === "reply" ? "评论回复话术" : "私信话术"}
+              <span className="ml-2 text-xs opacity-60">{tab === "reply" ? replyTemplates.length : dmTemplates.length}</span>
+            </button>
+          ))}
         </div>
 
         {/* Edit Form */}
         {isEditing && (
-          <Card className="mb-8">
-            <CardHeader title={editForm.id ? "编辑话术" : "新增话术"} />
-            <CardBody>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">话术名称</label>
-                  <Input placeholder="例如：默认回复" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">话术内容</label>
-                  <textarea className="block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border" rows={4} placeholder="输入话术内容..." value={editForm.content} onChange={(e) => setEditForm({ ...editForm, content: e.target.value })} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" id="isDefault" checked={editForm.isDefault} onChange={(e) => setEditForm({ ...editForm, isDefault: e.target.checked })} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                  <label htmlFor="isDefault" className="text-sm text-gray-700">设为默认话术</label>
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={handleSave}>保存</Button>
-                  <Button variant="ghost" onClick={() => setIsEditing(false)}>取消</Button>
-                </div>
+          <div className="bg-gray-50 rounded-3xl p-8 mb-10">
+            <h2 className="text-lg font-medium text-gray-900 mb-6">{editForm.id ? "编辑话术" : "新增话术"}</h2>
+            <div className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-500 mb-2">话术名称</label>
+                <input
+                  type="text"
+                  placeholder="例如：默认回复"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  className="block w-full rounded-2xl bg-white border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200 transition-all"
+                />
               </div>
-            </CardBody>
-          </Card>
+              <div>
+                <label className="block text-sm font-medium text-gray-500 mb-2">话术内容</label>
+                <textarea
+                  rows={4}
+                  placeholder="输入话术内容..."
+                  value={editForm.content}
+                  onChange={(e) => setEditForm({ ...editForm, content: e.target.value })}
+                  className="block w-full rounded-2xl bg-white border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200 transition-all resize-none"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="isDefault"
+                  checked={editForm.isDefault}
+                  onChange={(e) => setEditForm({ ...editForm, isDefault: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-200"
+                />
+                <label htmlFor="isDefault" className="text-sm text-gray-500">设为默认话术</label>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleSave}
+                  className="px-6 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 active:scale-95 transition-all"
+                >
+                  保存
+                </button>
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="px-6 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-full hover:bg-gray-200 active:scale-95 transition-all"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Template List */}
-        <Card>
-          <CardHeader title={activeTab === "reply" ? "评论回复话术" : "私信话术"} action={!isEditing && <Button size="sm" onClick={() => openEdit()}>+ 新增话术</Button>} />
-          <CardBody>
-            <div className="space-y-4">
-              {currentTemplates.map((template) => (
-                <div key={template.id} className="flex flex-col sm:flex-row sm:items-start justify-between p-4 bg-gray-50 rounded-xl gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-900">{template.name}</span>
-                      {template.isDefault && <Badge variant="success">默认</Badge>}
-                    </div>
-                    <div className="mt-2 text-sm text-gray-700 bg-white p-3 rounded-lg border border-gray-100">{template.content}</div>
+        <div className="bg-gray-50 rounded-3xl p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-medium text-gray-900">{activeTab === "reply" ? "评论回复话术" : "私信话术"}</h2>
+            {!isEditing && (
+              <button
+                onClick={() => openEdit()}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 active:scale-95 transition-all"
+              >
+                新增话术
+              </button>
+            )}
+          </div>
+          <div className="space-y-3">
+            {currentTemplates.map((template) => (
+              <div key={template.id} className="flex flex-col sm:flex-row sm:items-start justify-between p-5 bg-white rounded-2xl gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium text-gray-900">{template.name}</span>
+                    {template.isDefault && (
+                      <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700">默认</span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {!template.isDefault && <Button variant="ghost" size="sm" onClick={() => handleSetDefault(template.id)}>设为默认</Button>}
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(template)}>编辑</Button>
-                    {!template.isDefault && <Button variant="ghost" size="sm" onClick={() => handleDelete(template.id)}>删除</Button>}
-                  </div>
+                  <div className="mt-2 text-sm text-gray-600 bg-gray-50 p-4 rounded-2xl">{template.content}</div>
                 </div>
-              ))}
-            </div>
-          </CardBody>
-        </Card>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {!template.isDefault && (
+                    <button
+                      onClick={() => handleSetDefault(template.id)}
+                      className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-full hover:bg-gray-200 active:scale-95 transition-all"
+                    >
+                      设为默认
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openEdit(template)}
+                    className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-full hover:bg-gray-200 active:scale-95 transition-all"
+                  >
+                    编辑
+                  </button>
+                  {!template.isDefault && (
+                    <button
+                      onClick={() => handleDelete(template.id)}
+                      className="px-4 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-full hover:bg-red-100 active:scale-95 transition-all"
+                    >
+                      删除
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </main>
     </div>
   );
