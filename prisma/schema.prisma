@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  plan          Plan      @default(FREE)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // 关联
+  videos        Video[]
+  replyTemplates ReplyTemplate[]
+  dmTemplates   DmTemplate[]
+  activities    Activity[]
+  
+  @@map("users")
+}
+
+model Video {
+  id          String    @id @default(cuid())
+  url         String
+  platform    Platform  @default(DOUYIN)
+  title       String?
+  author      String?
+  status      VideoStatus @default(MONITORING)
+  userId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  user        User      @relation(fields: [userId], references: [id])
+  comments    Comment[]
+  
+  @@map("videos")
+}
+
+model Comment {
+  id          String    @id @default(cuid())
+  content     String
+  authorName  String
+  authorAvatar String?
+  intentScore Int       @default(0) // 1-5
+  intentKeywords String[]
+  status      CommentStatus @default(NEW)
+  videoId     String
+  createdAt   DateTime  @default(now())
+  
+  video       Video     @relation(fields: [videoId], references: [id])
+  replies     Reply[]
+  dms         Dm[]
+  
+  @@map("comments")
+}
+
+model Reply {
+  id          String    @id @default(cuid())
+  content     String
+  status      ReplyStatus @default(PENDING)
+  sentAt      DateTime?
+  commentId   String
+  createdAt   DateTime  @default(now())
+  
+  comment     Comment   @relation(fields: [commentId], references: [id])
+  
+  @@map("replies")
+}
+
+model Dm {
+  id          String    @id @default(cuid())
+  content     String
+  status      DmStatus  @default(PENDING)
+  sentAt      DateTime?
+  commentId   String
+  createdAt   DateTime  @default(now())
+  
+  comment     Comment   @relation(fields: [commentId], references: [id])
+  
+  @@map("dms")
+}
+
+model ReplyTemplate {
+  id          String    @id @default(cuid())
+  name        String
+  content     String
+  isDefault   Boolean   @default(false)
+  userId      String
+  createdAt   DateTime  @default(now())
+  
+  user        User      @relation(fields: [userId], references: [id])
+  
+  @@map("reply_templates")
+}
+
+model DmTemplate {
+  id          String    @id @default(cuid())
+  name        String
+  content     String
+  isDefault   Boolean   @default(false)
+  userId      String
+  createdAt   DateTime  @default(now())
+  
+  user        User      @relation(fields: [userId], references: [id])
+  
+  @@map("dm_templates")
+}
+
+model Activity {
+  id          String    @id @default(cuid())
+  type        ActivityType
+  description String
+  metadata    Json?
+  userId      String
+  createdAt   DateTime  @default(now())
+  
+  user        User      @relation(fields: [userId], references: [id])
+  
+  @@map("activities")
+}
+
+enum Plan {
+  FREE
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+enum Platform {
+  DOUYIN
+  KUAISHOU
+  SHIPINHAO
+}
+
+enum VideoStatus {
+  MONITORING
+  PAUSED
+  COMPLETED
+  ERROR
+}
+
+enum CommentStatus {
+  NEW
+  ANALYZED
+  REPLIED
+  DM_SENT
+  CONVERTED
+}
+
+enum ReplyStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum DmStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum ActivityType {
+  VIDEO_ADDED
+  COMMENTS_SCRAPED
+  INTENT_ANALYZED
+  REPLY_SENT
+  DM_SENT
+  USER_CONVERTED
+  ERROR
+}
