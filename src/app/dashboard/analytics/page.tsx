@@ -14,12 +14,7 @@ const timeRanges = [
 
 const mockData = {
   "7d": {
-    totalComments: 1234,
-    highIntent: 89,
-    replies: 56,
-    dms: 34,
-    converted: 12,
-    conversionRate: "1.0%",
+    totalComments: 1234, highIntent: 89, replies: 56, dms: 34, converted: 12, conversionRate: "1.0%",
     trend: [
       { date: "01-09", comments: 120, highIntent: 8, converted: 1 },
       { date: "01-10", comments: 156, highIntent: 12, converted: 2 },
@@ -43,12 +38,7 @@ const mockData = {
     ],
   },
   "30d": {
-    totalComments: 5678,
-    highIntent: 345,
-    replies: 234,
-    dms: 156,
-    converted: 56,
-    conversionRate: "1.0%",
+    totalComments: 5678, highIntent: 345, replies: 234, dms: 156, converted: 56, conversionRate: "1.0%",
     trend: [
       { date: "第1周", comments: 890, highIntent: 52, converted: 8 },
       { date: "第2周", comments: 1120, highIntent: 68, converted: 12 },
@@ -69,12 +59,7 @@ const mockData = {
     ],
   },
   "90d": {
-    totalComments: 18234,
-    highIntent: 1234,
-    replies: 890,
-    dms: 567,
-    converted: 234,
-    conversionRate: "1.3%",
+    totalComments: 18234, highIntent: 1234, replies: 890, dms: 567, converted: 234, conversionRate: "1.3%",
     trend: [
       { date: "第1月", comments: 4560, highIntent: 280, converted: 45 },
       { date: "第2月", comments: 5670, highIntent: 345, converted: 67 },
@@ -98,140 +83,111 @@ const mockData = {
 export default function AnalyticsPage() {
   const [timeRange, setTimeRange] = useState("7d");
   const data = mockData[timeRange as keyof typeof mockData];
-
-  // 简单的柱状图渲染
   const maxComments = Math.max(...data.trend.map((d) => d.comments));
+
+  const stats = [
+    { label: "总评论", value: data.totalComments, color: "text-gray-900", icon: "💬" },
+    { label: "高意向", value: data.highIntent, color: "text-red-600", icon: "🔥" },
+    { label: "已回复", value: data.replies, color: "text-blue-600", icon: "↩️" },
+    { label: "已私信", value: data.dms, color: "text-purple-600", icon: "📩" },
+    { label: "转化率", value: data.conversionRate, sub: `已获客 ${data.converted} 人`, color: "text-green-600", icon: "📈" },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
-
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">数据报表</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            分析获客效果，优化转化策略
-          </p>
+          <p className="mt-1 text-sm text-gray-500">分析获客效果，优化转化策略</p>
         </div>
 
-        {/* 时间筛选 */}
+        {/* Time Filter */}
         <div className="flex gap-2 mb-8">
           {timeRanges.map((range) => (
-            <Button
-              key={range.id}
-              variant={timeRange === range.id ? "primary" : "ghost"}
-              size="sm"
-              onClick={() => setTimeRange(range.id)}
-            >
-              {range.name}
-            </Button>
+            <Button key={range.id} variant={timeRange === range.id ? "primary" : "ghost"} size="sm" onClick={() => setTimeRange(range.id)}>{range.name}</Button>
           ))}
         </div>
 
-        {/* 核心指标 */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
-          <Card>
-            <div className="text-sm font-medium text-gray-600">总评论</div>
-            <div className="mt-2 text-3xl font-bold text-gray-900">{data.totalComments}</div>
-          </Card>
-          <Card>
-            <div className="text-sm font-medium text-gray-600">高意向</div>
-            <div className="mt-2 text-3xl font-bold text-red-600">{data.highIntent}</div>
-          </Card>
-          <Card>
-            <div className="text-sm font-medium text-gray-600">已回复</div>
-            <div className="mt-2 text-3xl font-bold text-blue-600">{data.replies}</div>
-          </Card>
-          <Card>
-            <div className="text-sm font-medium text-gray-600">已私信</div>
-            <div className="mt-2 text-3xl font-bold text-purple-600">{data.dms}</div>
-          </Card>
-          <Card>
-            <div className="text-sm font-medium text-gray-600">转化率</div>
-            <div className="mt-2 text-3xl font-bold text-green-600">{data.conversionRate}</div>
-            <div className="mt-1 text-xs text-gray-500">已获客 {data.converted} 人</div>
-          </Card>
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+          {stats.map((stat) => (
+            <div key={stat.label} className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">{stat.icon}</span>
+                <span className="text-sm text-gray-500">{stat.label}</span>
+              </div>
+              <div className={`mt-2 text-2xl font-bold ${stat.color}`}>{stat.value}</div>
+              {stat.sub && <div className="mt-1 text-xs text-gray-400">{stat.sub}</div>}
+            </div>
+          ))}
         </div>
 
-        {/* 趋势图 */}
-        <Card className="mb-8">
-          <CardHeader title="趋势分析" />
-          <CardBody>
-            <div className="space-y-6">
-              {data.trend.map((item) => (
-                <div key={item.date}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-gray-700">{item.date}</span>
-                    <div className="flex gap-4 text-xs text-gray-500">
-                      <span>评论: {item.comments}</span>
-                      <span className="text-red-500">高意向: {item.highIntent}</span>
-                      <span className="text-green-500">转化: {item.converted}</span>
-                    </div>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-4">
-                    <div
-                      className="bg-blue-500 h-4 rounded-full transition-all"
-                      style={{ width: `${(item.comments / maxComments) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardBody>
-        </Card>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* 热门视频 */}
-          <Card>
-            <CardHeader title="热门视频排行" />
-            <CardBody>
-              <div className="space-y-4">
-                {data.topVideos.map((video, idx) => (
-                  <div
-                    key={video.title}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold">
-                        {idx + 1}
-                      </span>
-                      <div>
-                        <div className="font-medium text-sm text-gray-900">{video.title}</div>
-                        <div className="text-xs text-gray-500">
-                          评论 {video.comments} · 高意向 {video.highIntent} · 转化 {video.converted}
+        <div className="grid lg:grid-cols-3 gap-8">
+          {/* Trend Chart */}
+          <div className="lg:col-span-2">
+            <Card>
+              <CardHeader title="趋势分析" />
+              <CardBody>
+                <div className="space-y-5">
+                  {data.trend.map((item) => (
+                    <div key={item.date}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-gray-700">{item.date}</span>
+                        <div className="flex gap-3 text-xs text-gray-500">
+                          <span>{item.comments} 评论</span>
+                          <span className="text-red-500">{item.highIntent} 高意向</span>
+                          <span className="text-green-500">{item.converted} 转化</span>
                         </div>
                       </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2.5">
+                        <div className="bg-gradient-to-r from-blue-500 to-purple-500 h-2.5 rounded-full transition-all" style={{ width: `${(item.comments / maxComments) * 100}%` }} />
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </CardBody>
-          </Card>
+                  ))}
+                </div>
+              </CardBody>
+            </Card>
+          </div>
 
-          {/* 热门关键词 */}
-          <Card>
-            <CardHeader title="热门意向关键词" />
-            <CardBody>
-              <div className="space-y-4">
-                {data.topKeywords.map((kw, idx) => (
-                  <div
-                    key={kw.word}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-sm font-bold">
-                        {idx + 1}
-                      </span>
-                      <span className="font-medium text-sm text-gray-900">{kw.word}</span>
+          {/* Side Cards */}
+          <div className="space-y-8">
+            {/* Top Videos */}
+            <Card>
+              <CardHeader title="热门视频排行" />
+              <CardBody>
+                <div className="space-y-3">
+                  {data.topVideos.map((video, idx) => (
+                    <div key={video.title} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                      <span className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">{idx + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900 truncate">{video.title}</div>
+                        <div className="text-xs text-gray-500">{video.comments} 评论 · {video.highIntent} 高意向 · {video.converted} 转化</div>
+                      </div>
                     </div>
-                    <Badge variant={idx < 2 ? "danger" : idx < 4 ? "warning" : "info"}>
-                      {kw.count} 次
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </CardBody>
-          </Card>
+                  ))}
+                </div>
+              </CardBody>
+            </Card>
+
+            {/* Top Keywords */}
+            <Card>
+              <CardHeader title="热门意向关键词" />
+              <CardBody>
+                <div className="space-y-3">
+                  {data.topKeywords.map((kw, idx) => (
+                    <div key={kw.word} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <span className="w-7 h-7 rounded-full bg-gradient-to-br from-red-400 to-orange-500 flex items-center justify-center text-white text-xs font-bold">{idx + 1}</span>
+                        <span className="text-sm font-medium text-gray-900">{kw.word}</span>
+                      </div>
+                      <Badge variant={idx < 2 ? "danger" : idx < 4 ? "warning" : "info"}>{kw.count} 次</Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardBody>
+            </Card>
+          </div>
         </div>
       </main>
     </div>
