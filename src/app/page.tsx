@@ -29,7 +29,7 @@ export default function Home() {
       {/* Hero Section */}
       <section className="pt-32 pb-20 md:pt-48 md:pb-32">
         <div className="max-w-5xl mx-auto px-6 text-center">
-          <h1 className="text-5xl md:text-7xl font-bold text-gray-900 tracking-tight leading-tight">
+          <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 tracking-tight leading-tight">
             社交媒体
             <br />
             <span className="text-gray-400">智能截流工具</span>
@@ -69,7 +69,6 @@ export default function Home() {
           
           {/* Dashboard Preview */}
           <div className="relative mx-auto max-w-4xl">
-            <div className="absolute inset-0 bg-gradient-to-b from-blue-500/20 to-transparent blur-3xl rounded-full" />
             <div className="relative bg-gray-900 rounded-3xl border border-gray-800 overflow-hidden shadow-2xl">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800">
                 <div className="w-3 h-3 rounded-full bg-red-500" />
@@ -107,32 +106,32 @@ export default function Home() {
           <div className="grid md:grid-cols-2 gap-12">
             {[
               {
-                icon: "🎥",
+                icon: "M",
                 title: "多平台监控",
                 desc: "同时监控抖音、快手、视频号评论区，自动抓取最新评论",
               },
               {
-                icon: "🧠",
+                icon: "A",
                 title: "AI 意向识别",
                 desc: "基于 GPT 模型分析评论语义，自动识别购买/学习/合作意向",
               },
               {
-                icon: "🤖",
+                icon: "R",
                 title: "自动触达",
                 desc: "对高意向用户自动回复评论、发送私信，引导至私域",
               },
               {
-                icon: "📊",
+                icon: "D",
                 title: "数据报表",
                 desc: "实时监控转化率、热门关键词、视频效果，数据驱动决策",
               },
               {
-                icon: "📝",
+                icon: "T",
                 title: "话术管理",
                 desc: "预设多种场景回复模板，合规引导避免封号风险",
               },
               {
-                icon: "🔒",
+                icon: "S",
                 title: "安全合规",
                 desc: "智能检测违规话术，模拟人工操作频率，降低封号风险",
               },
@@ -141,7 +140,9 @@ export default function Home() {
                 key={feature.title}
                 className={`p-8 rounded-3xl ${idx === 0 || idx === 3 ? 'bg-gray-50' : 'bg-white'}`}
               >
-                <div className="text-3xl mb-4">{feature.icon}</div>
+                <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-white text-sm font-bold mb-4">
+                  {feature.icon}
+                </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">{feature.title}</h3>
                 <p className="text-gray-400 leading-relaxed">{feature.desc}</p>
               </div>
@@ -203,7 +204,7 @@ export default function Home() {
                 <ul className="mt-8 space-y-4">
                   {plan.features.map((f) => (
                     <li key={f} className="flex items-center gap-3">
-                      <svg className={`w-5 h-5 ${plan.popular ? 'text-blue-400' : 'text-gray-900'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className={`w-5 h-5 ${plan.popular ? 'text-gray-400' : 'text-gray-900'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
                       <span className="text-sm">{f}</span>

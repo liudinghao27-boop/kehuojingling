@@ -9,10 +9,10 @@ import { useToast } from "@/components/ui/Toast";
 import Link from "next/link";
 
 const stats = [
-  { label: "监控视频", value: "5", change: "+2", icon: "🎥" },
-  { label: "抓取评论", value: "1,234", change: "+156", icon: "💬" },
-  { label: "高意向用户", value: "89", change: "需处理", icon: "🔥" },
-  { label: "今日获客", value: "12", change: "+3", icon: "✅" },
+  { label: "监控视频", value: "5", change: "+2" },
+  { label: "抓取评论", value: "1,234", change: "+156" },
+  { label: "高意向用户", value: "89", change: "需处理" },
+  { label: "今日获客", value: "12", change: "+3" },
 ];
 
 const recentVideos = [
@@ -50,7 +50,6 @@ export default function DashboardPage() {
               key={stat.label}
               className="bg-gray-50 rounded-3xl p-6 hover:bg-gray-100 transition-colors"
             >
-              <div className="text-2xl mb-3">{stat.icon}</div>
               <div className="text-3xl font-bold text-gray-900 tracking-tight">{stat.value}</div>
               <div className="text-sm text-gray-400 mt-1">{stat.label}</div>
               <div className="text-xs text-gray-400 mt-2 font-medium">{stat.change}</div>
@@ -77,7 +76,7 @@ export default function DashboardPage() {
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3">
-                        <span className="text-xl">🎥</span>
+                        <span className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">V</span>
                         <span className="font-medium text-gray-900 truncate">{video.title}</span>
                         <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">监控中</span>
                       </div>
@@ -185,17 +184,17 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 <Link href="/dashboard/videos" className="block">
                   <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
-                    <span className="mr-3">🎥</span> 添加监控视频
+                    <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">V</span> 添加监控视频
                   </Button>
                 </Link>
                 <Link href="/dashboard/templates" className="block">
                   <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
-                    <span className="mr-3">📝</span> 管理话术模板
+                    <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">T</span> 管理话术模板
                   </Button>
                 </Link>
                 <Link href="/dashboard/analytics" className="block">
                   <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
-                    <span className="mr-3">📊</span> 查看数据报表
+                    <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">D</span> 查看数据报表
                   </Button>
                 </Link>
               </div>

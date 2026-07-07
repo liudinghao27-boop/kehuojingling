@@ -12,22 +12,22 @@ export function Navbar({ className }: NavbarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = [
-    { href: "/dashboard", label: "仪表盘", icon: "📊" },
-    { href: "/dashboard/videos", label: "视频监控", icon: "🎥" },
-    { href: "/dashboard/comments", label: "评论列表", icon: "💬" },
-    { href: "/dashboard/templates", label: "话术管理", icon: "📝" },
-    { href: "/dashboard/analytics", label: "数据报表", icon: "📈" },
+    { href: "/dashboard", label: "仪表盘" },
+    { href: "/dashboard/videos", label: "视频监控" },
+    { href: "/dashboard/comments", label: "评论列表" },
+    { href: "/dashboard/templates", label: "话术管理" },
+    { href: "/dashboard/analytics", label: "数据报表" },
   ];
 
   return (
-    <nav className={cn("bg-white border-b border-gray-200 sticky top-0 z-50", className)}>
+    <nav className={cn("bg-white/80 backdrop-blur-xl border-b border-gray-100/50 sticky top-0 z-50", className)}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           {/* Logo + Desktop Nav */}
           <div className="flex items-center gap-8">
             <Link href="/dashboard" className="flex items-center gap-2 text-xl font-bold text-gray-900">
-              <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm">
-                🎯
+              <span className="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-sm font-bold">
+                K
               </span>
               <span>获客精灵</span>
             </Link>
@@ -37,7 +37,7 @@ export function Navbar({ className }: NavbarProps) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors"
+                  className="px-4 py-2 rounded-full text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
                 >
                   {item.label}
                 </Link>
@@ -49,11 +49,11 @@ export function Navbar({ className }: NavbarProps) {
           <div className="flex items-center gap-4">
             {session?.user ? (
               <div className="flex items-center gap-4">
-                <span className="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                <span className="hidden sm:inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
                   {session.user.plan === "FREE" ? "免费版" : session.user.plan}
                 </span>
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
+                  <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white text-sm font-medium">
                     {session.user.name?.[0] || "U"}
                   </div>
                   <button
@@ -67,7 +67,7 @@ export function Navbar({ className }: NavbarProps) {
             ) : (
               <Link
                 href="/login"
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+                className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-full text-white bg-gray-900 hover:bg-gray-800 transition-colors"
               >
                 登录
               </Link>
@@ -75,7 +75,7 @@ export function Navbar({ className }: NavbarProps) {
 
             {/* Mobile menu button */}
             <button
-              className="md:hidden p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              className="md:hidden p-2 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100"
               onClick={() => setMobileOpen(!mobileOpen)}
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,10 +98,9 @@ export function Navbar({ className }: NavbarProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className="block px-3 py-2 rounded-md text-base font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                className="block px-3 py-2 rounded-full text-base font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                 onClick={() => setMobileOpen(false)}
               >
-                <span className="mr-2">{item.icon}</span>
                 {item.label}
               </Link>
             ))}

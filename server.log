@@ -1,4 +1,15 @@
-▲ Next.js 16.2.10
-- Local:         http://localhost:3000
-- Network:       http://172.18.0.1:3000
-✓ Ready in 83ms
+▲ Next.js 16.2.10 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://172.18.0.1:3001
+- Environments: .env
+✓ Ready in 232ms
+
+ GET /login 200 in 1776ms (next.js: 1567ms, application-code: 209ms)
+ GET / 200 in 507ms (next.js: 398ms, application-code: 109ms)
+ GET /api/auth/session 200 in 797ms (next.js: 773ms, application-code: 24ms)
+ GET /api/auth/session 200 in 457ms (next.js: 433ms, application-code: 24ms)
+ GET / 200 in 52ms (next.js: 2ms, application-code: 50ms)
+ GET / 200 in 49ms (next.js: 3ms, application-code: 47ms)
+ GET /login 200 in 60ms (next.js: 20ms, application-code: 40ms)
+ GET /login 200 in 24ms (next.js: 2ms, application-code: 22ms)
+✓ Compiled in 57ms
