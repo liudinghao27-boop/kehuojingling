@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+
 
 /**
  * 抖音/TikTok 视频信息解析服务
@@ -23,53 +23,79 @@ interface ScrapedComment {
   likes: number;
 }
 
-// 解析视频链接，提取平台信息和视频ID
-export function parseVideoUrl(url: string): ParsedVideo | null {
+// 从分享文本中提取第一个 http/https 链接
+function extractUrlFromText(text: string): string | null {
+  // 保守匹配：到空白或常见中文标点/右括号为止
+  const urlRegex = /https?:\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+/i;
+  const match = text.match(urlRegex);
+  return match ? match[0].replace(/[，。！？、；：“”‘’（）【】]+$/, '') : null;
+}
+
+// 解析视频链接，支持从抖音分享文案中提取链接
+export function parseVideoUrl(rawInput: string): ParsedVideo | null {
+  const input = rawInput.trim();
+
+  // 1. 如果用户复制的是带文案的分享文本，先提取链接
+  let url = input;
+  try {
+    new URL(input);
+  } catch {
+    const extracted = extractUrlFromText(input);
+    if (!extracted) return null;
+    url = extracted;
+  }
+
   try {
     const urlObj = new URL(url);
-    
+
     // 抖音链接解析
     if (url.includes('douyin.com') || url.includes('iesdouyin.com')) {
-      // 支持格式:
-      // https://v.douyin.com/xxxxx (短链)
-      // https://www.douyin.com/video/xxxxx
+      // 支持的抖音格式:
+      // https://v.douyin.com/xxxxx (短链，可能带 ?utm_source=... 等参数)
+      // https://www.douyin.com/video/xxxxx?modeFrom=
       // https://www.douyin.com/user/xxx?modal_id=xxxxx
-      
+      // https://m.douyin.com/video/xxxxx
+
       let videoId = '';
-      
+
       if (urlObj.pathname.includes('/video/')) {
         videoId = urlObj.pathname.split('/video/')[1]?.split('/')[0] || '';
       } else if (urlObj.searchParams.has('modal_id')) {
         videoId = urlObj.searchParams.get('modal_id') || '';
       } else if (urlObj.pathname.length > 1) {
-        // 短链处理，取路径最后一段
-        videoId = urlObj.pathname.split('/').pop() || '';
+        // 短链处理：取路径最后一段
+        videoId = urlObj.pathname.split('/').filter(Boolean).pop() || '';
       }
-      
+
+      // 清理多余参数，只保留解析需要的部分，避免 scraper 解析异常
+      const cleanUrl = url.split('?')[0];
+
       return {
         platform: 'DOUYIN',
         videoId: videoId || `douyin_${Date.now()}`,
-        originalUrl: url,
+        originalUrl: cleanUrl,
       };
     }
-    
+
     // 快手链接解析
     if (url.includes('kuaishou.com') || url.includes('kuaishou.cn')) {
       let videoId = '';
-      
+
       if (urlObj.pathname.includes('/short-video/')) {
         videoId = urlObj.pathname.split('/short-video/')[1]?.split('/')[0] || '';
       } else {
-        videoId = urlObj.pathname.split('/').pop() || '';
+        videoId = urlObj.pathname.split('/').filter(Boolean).pop() || '';
       }
-      
+
+      const cleanUrl = url.split('?')[0];
+
       return {
         platform: 'KUAISHOU',
         videoId: videoId || `kuaishou_${Date.now()}`,
-        originalUrl: url,
+        originalUrl: cleanUrl,
       };
     }
-    
+
     // 视频号链接解析 (微信)
     if (url.includes('channels.weixin.qq.com') || url.includes('weixin.qq.com')) {
       return {
@@ -78,7 +104,7 @@ export function parseVideoUrl(url: string): ParsedVideo | null {
         originalUrl: url,
       };
     }
-    
+
     return null;
   } catch {
     return null;
@@ -177,38 +203,82 @@ export async function scrapeComments(
   return comments;
 }
 
-// 生产环境真实API调用示例（需要部署对应的爬虫服务）
+// 生产环境真实API调用（ Evil0ctal/Douyin_TikTok_Download_API ）
 export async function scrapeCommentsReal(
   parsedVideo: ParsedVideo,
   apiEndpoint: string = process.env.SCRAPER_API_URL || 'http://localhost:8000'
 ): Promise<ScrapedComment[]> {
-  try {
-    const response = await fetch(`${apiEndpoint}/api/hybrid/video_data`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: parsedVideo.originalUrl,
-        platform: parsedVideo.platform.toLowerCase(),
-      }),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Scraper API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // 转换 Evil0ctal API 返回格式到我们的格式
-    return (data.comments || []).map((c: any, idx: number) => ({
-      id: `${parsedVideo.videoId}_c${idx}`,
-      authorName: c.user?.nickname || '未知用户',
-      authorAvatar: c.user?.avatar || '',
-      content: c.text || '',
-      createdAt: c.create_time || new Date().toISOString(),
-      likes: c.digg_count || 0,
-    }));
-  } catch (error) {
-    console.error('Real scraper failed, falling back to mock:', error);
-    return scrapeComments(parsedVideo);
+  const endpoint = apiEndpoint.replace(/\/$/, '');
+
+  // 1. 先解析出平台内部视频ID
+  const hybridRes = await fetch(
+    `${endpoint}/api/hybrid/video_data?url=${encodeURIComponent(parsedVideo.originalUrl)}`,
+    { method: 'GET' }
+  );
+
+  if (!hybridRes.ok) {
+    throw new Error(`Hybrid API error: ${hybridRes.status}`);
   }
+
+  const hybridData = await hybridRes.json();
+  const awemeId = hybridData?.data?.aweme_id;
+
+  if (!awemeId) {
+    throw new Error('无法从视频链接解析出 aweme_id');
+  }
+
+  // 2. 拉取评论（抖音）
+  if (parsedVideo.platform === 'DOUYIN') {
+    const commentsRes = await fetch(
+      `${endpoint}/api/douyin/web/fetch_video_comments?aweme_id=${awemeId}&cursor=0&count=50`,
+      { method: 'GET' }
+    );
+
+    if (!commentsRes.ok) {
+      throw new Error(`Comments API error: ${commentsRes.status}`);
+    }
+
+    const commentsData = await commentsRes.json();
+    const comments = commentsData?.data?.comments || [];
+
+    return comments.map((c: unknown, idx: number) => {
+      const comment = c as {
+        user?: {
+          nickname?: string;
+          avatar_thumb?: { url_list?: string[] };
+          avatar?: { url_list?: string[] };
+        };
+        text?: string;
+        create_time?: number;
+        digg_count?: number;
+      };
+      return {
+        id: `${parsedVideo.videoId}_c${idx}`,
+        authorName: comment.user?.nickname || '未知用户',
+        authorAvatar: comment.user?.avatar_thumb?.url_list?.[0] || comment.user?.avatar?.url_list?.[0] || '',
+        content: comment.text || '',
+        createdAt: comment.create_time ? new Date(comment.create_time * 1000).toISOString() : new Date().toISOString(),
+        likes: comment.digg_count || 0,
+      };
+    });
+  }
+
+  // 其他平台：先尝试 hybrid 返回的 comment_list
+  const comments = hybridData?.data?.comment_list || [];
+  return comments.map((c: unknown, idx: number) => {
+    const comment = c as {
+      user?: { nickname?: string; avatar?: string };
+      text?: string;
+      create_time?: string;
+      digg_count?: number;
+    };
+    return {
+      id: `${parsedVideo.videoId}_c${idx}`,
+      authorName: comment.user?.nickname || '未知用户',
+      authorAvatar: comment.user?.avatar || '',
+      content: comment.text || '',
+      createdAt: comment.create_time || new Date().toISOString(),
+      likes: comment.digg_count || 0,
+    };
+  });
 }

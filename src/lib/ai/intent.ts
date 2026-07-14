@@ -1,23 +1,10 @@
-import OpenAI from 'openai';
+import { createAIClient, getAIModel, hasAIKeyConfigured } from './client';
 
 /**
  * AI 意向识别服务
- * 基于 OpenAI GPT API 实现评论意向分析
+ * 基于大模型 API 实现评论意向分析
  * 可识别用户购买意向、学习意向、合作意向等
  */
-
-// 懒加载 OpenAI 实例，避免构建时缺少 API Key 报错
-let openai: OpenAI | null = null;
-
-function getOpenAI(): OpenAI {
-  if (!openai) {
-    openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || '',
-      baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    });
-  }
-  return openai;
-}
 
 export interface IntentAnalysis {
   score: number; // 1-5 意向分数
@@ -26,19 +13,22 @@ export interface IntentAnalysis {
   reason: string; // AI 判断理由
 }
 
-const SYSTEM_PROMPT = `你是一个社交媒体评论意向分析专家。
+function buildSystemPrompt(industryContext?: string): string {
+  const contextPrompt = industryContext
+    ? `\n\n当前业务场景：${industryContext}\n请结合以上业务场景判断评论意向。与该业务高度相关的咨询、求助、购买/办理意愿视为高意向；无关的闲聊、表情、泛泛评价视为低意向。`
+    : '';
 
-你的任务是分析用户评论，判断其对商家的意向程度。
+  return `你是一个社交媒体评论意向分析专家。你的任务是分析用户评论，判断其对商家的意向程度。${contextPrompt}
 
 评分标准（1-5分）：
-- 5分（强意向）：明确表达购买/合作/学习意愿，如"多少钱？""怎么联系？""想学习"
-- 4分（高意向）：有明确需求但不够直接，如"哪里可以买？""求带"
-- 3分（中意向）：表达兴趣但无明确行动意愿，如"看起来不错""收藏了"
-- 2分（低意向）：泛泛的正面评价，如"666""学习了"
-- 1分（无意向）：无关评论或负面评论
+- 5分（强意向）：明确表达咨询、购买、合作、办理意愿，或提出与业务直接相关的具体问题，如"多少钱？""怎么联系？""需要什么条件？""我能办吗？"
+- 4分（高意向）：有明确需求但不够直接，如"哪里可以办？""求带""了解一下"
+- 3分（中意向）：表达兴趣但无明确行动意愿，如"看起来不错""收藏了""有用吗"
+- 2分（低意向）：泛泛的正面评价，如"666""学习了""厉害了"
+- 1分（无意向）：无关评论、纯表情、负面评论或闲聊
 
 同时识别评论中的意向关键词，并判断意向类别：
-- purchase: 购买意向
+- purchase: 购买/办理意向
 - learn: 学习意向
 - cooperate: 合作意向
 - inquiry: 咨询意向
@@ -51,19 +41,24 @@ const SYSTEM_PROMPT = `你是一个社交媒体评论意向分析专家。
   "category": "类别",
   "reason": "判断理由"
 }`;
+}
 
 // 使用 OpenAI API 分析评论意向
-export async function analyzeIntentWithAI(comment: string): Promise<IntentAnalysis> {
+export async function analyzeIntentWithAI(
+  comment: string,
+  industryContext?: string,
+  apiKey?: string
+): Promise<IntentAnalysis> {
   try {
-    if (!process.env.OPENAI_API_KEY) {
+    if (!hasAIKeyConfigured(apiKey)) {
       // 没有 API Key 时回退到本地规则分析
-      return analyzeIntentLocal(comment);
+      return analyzeIntentLocal(comment, industryContext);
     }
 
-    const response = await getOpenAI().chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    const response = await createAIClient(apiKey).chat.completions.create({
+      model: getAIModel(),
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: buildSystemPrompt(industryContext) },
         { role: 'user', content: `请分析以下评论的意向：\n\n"${comment}"` },
       ],
       temperature: 0.3,
@@ -86,21 +81,25 @@ export async function analyzeIntentWithAI(comment: string): Promise<IntentAnalys
   } catch (error) {
     console.error('AI analysis error:', error);
     // API 调用失败时回退到本地规则
-    return analyzeIntentLocal(comment);
+    return analyzeIntentLocal(comment, industryContext);
   }
 }
 
 // 批量分析评论意向（更高效，使用单个请求）
-export async function analyzeBatchWithAI(comments: string[]): Promise<IntentAnalysis[]> {
+export async function analyzeBatchWithAI(
+  comments: string[],
+  industryContext?: string,
+  apiKey?: string
+): Promise<IntentAnalysis[]> {
   try {
-    if (!process.env.OPENAI_API_KEY || comments.length === 0) {
-      return comments.map(c => analyzeIntentLocal(c));
+    if (!hasAIKeyConfigured(apiKey) || comments.length === 0) {
+      return comments.map(c => analyzeIntentLocal(c, industryContext));
     }
 
-    const response = await getOpenAI().chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    const response = await createAIClient(apiKey).chat.completions.create({
+      model: getAIModel(),
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: buildSystemPrompt(industryContext) },
         { 
           role: 'user', 
           content: `请批量分析以下 ${comments.length} 条评论的意向，返回 JSON 数组：\n\n${comments.map((c, i) => `${i + 1}. "${c}"`).join('\n')}\n\n返回格式：[{"score": 1, "keywords": [], "category": "none", "reason": ""}]` 
@@ -118,20 +117,21 @@ export async function analyzeBatchWithAI(comments: string[]): Promise<IntentAnal
     const result = JSON.parse(content);
     const analyses = Array.isArray(result) ? result : result.analyses || [];
     
-    return analyses.map((a: any) => ({
-      score: Math.max(1, Math.min(5, Math.round(a.score))),
+    return analyses.map((a: { score?: unknown; keywords?: unknown; category?: unknown; reason?: unknown }) => ({
+      score: Math.max(1, Math.min(5, Math.round(typeof a.score === 'number' ? a.score : Number(a.score)))),
       keywords: a.keywords || [],
       category: a.category || 'none',
       reason: a.reason || '',
     }));
   } catch (error) {
     console.error('Batch AI analysis error:', error);
-    return comments.map(c => analyzeIntentLocal(c));
+    return comments.map(c => analyzeIntentLocal(c, industryContext));
   }
 }
 
 // 本地规则分析（无需 API Key，作为 fallback）
-export function analyzeIntentLocal(comment: string): IntentAnalysis {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function analyzeIntentLocal(comment: string, _industryContext?: string): IntentAnalysis {
   const text = comment.toLowerCase();
   
   // 强意向关键词
@@ -227,16 +227,17 @@ export function analyzeIntentLocal(comment: string): IntentAnalysis {
 export async function generateReplySuggestion(
   comment: string,
   intent: IntentAnalysis,
-  template?: string
+  template?: string,
+  apiKey?: string
 ): Promise<string> {
   try {
-    if (!process.env.OPENAI_API_KEY) {
+    if (!hasAIKeyConfigured(apiKey)) {
       // 回退到模板回复
       return template || getDefaultReply(intent);
     }
 
-    const response = await getOpenAI().chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    const response = await createAIClient(apiKey).chat.completions.create({
+      model: getAIModel(),
       messages: [
         {
           role: 'system',

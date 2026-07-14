@@ -1,9 +1,24 @@
 "use client";
 
 import { Navbar } from "@/components/layout/Navbar";
-import { useToast } from "@/components/ui/Toast";
-import { useState } from "react";
+import { useToast } from "@/components/ui/use-toast";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { downloadCSV } from "@/lib/csv";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const platforms = [
   { id: "DOUYIN", name: "抖音", abbr: "抖" },
@@ -11,46 +26,196 @@ const platforms = [
   { id: "SHIPINHAO", name: "视频号", abbr: "视" },
 ];
 
-const mockVideos = [
-  { id: "1", title: "花艺教程：玫瑰包装技巧", platform: "DOUYIN", url: "https://v.douyin.com/xxxxx", author: "花艺师小王", status: "MONITORING", comments: 234, highIntent: 12, createdAt: "2024-01-15" },
-  { id: "2", title: "新手开店：花店选址攻略", platform: "DOUYIN", url: "https://v.douyin.com/yyyyy", author: "创业导师李", status: "MONITORING", comments: 156, highIntent: 8, createdAt: "2024-01-14" },
-  { id: "3", title: "情人节花束推荐", platform: "KUAISHOU", url: "https://v.kuaishou.com/zzzzz", author: "浪漫花艺", status: "PAUSED", comments: 89, highIntent: 3, createdAt: "2024-01-10" },
-];
+const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  MONITORING: { label: "监控中", variant: "default" },
+  PAUSED: { label: "已暂停", variant: "secondary" },
+  ERROR: { label: "异常", variant: "destructive" },
+};
+
+interface Video {
+  id: string;
+  url: string;
+  platform: string;
+  title: string;
+  author: string;
+  status: string;
+  comments: number;
+  highIntent: number;
+  lastScrapedAt: string | null;
+  createdAt: string;
+}
+
+function formatLastScraped(dateString: string | null) {
+  if (!dateString) return '尚未抓取';
+  const date = new Date(dateString);
+  const now = new Date();
+  const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+  if (diff < 60) return '刚刚抓取';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前抓取`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前抓取`;
+  return `${Math.floor(diff / 86400)} 天前抓取`;
+}
 
 export default function VideosPage() {
   const { addToast } = useToast();
-  const [videos, setVideos] = useState(mockVideos);
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [newUrl, setNewUrl] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("DOUYIN");
+  const [deleteTarget, setDeleteTarget] = useState<Video | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [scrapingIds, setScrapingIds] = useState<Set<string>>(new Set());
 
-  const handleAddVideo = () => {
+  const fetchVideosData = useCallback(async (): Promise<Video[]> => {
+    const res = await fetch('/api/videos');
+    if (!res.ok) throw new Error('获取视频列表失败');
+    const data = await res.json();
+    return data.videos || [];
+  }, []);
+
+  const exportToCSV = () => {
+    if (videos.length === 0) {
+      addToast('暂无视频可导出', 'error');
+      return;
+    }
+    const rows: string[][] = [
+      ['平台', '标题', '作者', '状态', '评论数', '高意向', '最近抓取', '链接'],
+    ];
+    videos.forEach((video) => {
+      const platform = platforms.find((p) => p.id === video.platform)?.name || video.platform;
+      const status = statusMap[video.status]?.label || video.status;
+      rows.push([
+        platform,
+        video.title,
+        video.author,
+        status,
+        String(video.comments),
+        String(video.highIntent),
+        formatLastScraped(video.lastScrapedAt),
+        video.url,
+      ]);
+    });
+    downloadCSV(rows, `监控视频_${new Date().toISOString().slice(0, 10)}.csv`);
+    addToast('视频列表已导出', 'success');
+  };
+
+  useEffect(() => {
+    let ignore = false;
+    fetchVideosData()
+      .then((items) => {
+        if (!ignore) setVideos(items);
+      })
+      .catch((error) => {
+        if (!ignore) {
+          console.error('Fetch videos error:', error);
+          addToast('获取视频列表失败', 'error');
+        }
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [fetchVideosData, addToast]);
+
+  const handleAddVideo = async () => {
     if (!newUrl.trim()) { addToast("请输入视频链接", "error"); return; }
-    const newVideo = { id: String(videos.length + 1), title: "新添加的视频", platform: selectedPlatform, url: newUrl, author: "未知作者", status: "MONITORING" as const, comments: 0, highIntent: 0, createdAt: new Date().toISOString().split("T")[0] };
-    setVideos([newVideo, ...videos]);
-    setNewUrl("");
-    addToast("视频添加成功，开始监控", "success");
-  };
+    
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: newUrl, platform: selectedPlatform }),
+      });
 
-  const toggleStatus = (id: string) => {
-    setVideos(videos.map((v) => v.id === id ? { ...v, status: v.status === "MONITORING" ? "PAUSED" : "MONITORING" } : v));
-    addToast("状态已更新", "success");
-  };
+      const data = await res.json();
+      if (!res.ok) {
+        addToast(data.error || '添加失败', 'error');
+        return;
+      }
 
-  const getStatusStyle = (status: string) => {
-    switch (status) {
-      case "MONITORING": return "bg-green-50 text-green-700";
-      case "PAUSED": return "bg-amber-50 text-amber-700";
-      case "ERROR": return "bg-red-50 text-red-700";
-      default: return "bg-gray-50 text-gray-600";
+      setVideos([data.video, ...videos]);
+      setNewUrl("");
+      const msg = data.video.comments > 0
+        ? `视频添加成功，已抓取 ${data.video.comments} 条评论`
+        : '视频添加成功，开始监控';
+      addToast(msg, "success");
+    } catch (error) {
+      console.error('Add video error:', error);
+      addToast('添加视频失败', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "MONITORING": return "监控中";
-      case "PAUSED": return "已暂停";
-      case "ERROR": return "异常";
-      default: return status;
+  const toggleStatus = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === "MONITORING" ? "PAUSED" : "MONITORING";
+    try {
+      const res = await fetch(`/api/videos/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        addToast(data.error || '更新失败', 'error');
+        return;
+      }
+
+      setVideos(videos.map((v) => v.id === id ? { ...v, status: newStatus } : v));
+      addToast("状态已更新", "success");
+    } catch (error) {
+      console.error('Update video error:', error);
+      addToast('更新状态失败', 'error');
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/videos/${deleteTarget.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) {
+        addToast(data.error || '删除失败', 'error');
+        return;
+      }
+
+      setVideos(videos.filter((v) => v.id !== deleteTarget.id));
+      addToast('视频已删除', 'success');
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error('Delete video error:', error);
+      addToast('删除视频失败', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleScrapeNow = async (id: string) => {
+    setScrapingIds((prev) => new Set(prev).add(id));
+    try {
+      const res = await fetch(`/api/videos/${id}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        addToast(data.error || '触发抓取失败', 'error');
+        return;
+      }
+      addToast('已加入抓取队列，稍后刷新查看', 'success');
+    } catch (error) {
+      console.error('Scrape now error:', error);
+      addToast('触发抓取失败', 'error');
+    } finally {
+      setScrapingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -64,86 +229,167 @@ export default function VideosPage() {
         </div>
 
         {/* Add Video */}
-        <div className="bg-gray-50 rounded-3xl p-8 mb-10">
-          <h2 className="text-lg font-medium text-gray-900 mb-6">添加新视频</h2>
-          <div className="flex flex-col sm:flex-row gap-4 items-end">
-            <div className="flex-1 w-full">
-              <label className="block text-sm font-medium text-gray-500 mb-2">视频链接</label>
-              <input
-                type="text"
-                placeholder="粘贴抖音 / 快手 / 视频号链接"
-                value={newUrl}
-                onChange={(e) => setNewUrl(e.target.value)}
-                className="block w-full rounded-2xl bg-white border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200 transition-all"
-              />
-            </div>
-            <div className="w-full sm:w-44">
-              <label className="block text-sm font-medium text-gray-500 mb-2">平台</label>
-              <select
-                className="block w-full rounded-2xl bg-white border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200 transition-all"
-                value={selectedPlatform}
-                onChange={(e) => setSelectedPlatform(e.target.value)}
+        <Card className="rounded-3xl border-0 shadow-none bg-gray-50 mb-10">
+          <CardContent className="p-8">
+            <h2 className="text-lg font-medium text-gray-900 mb-6">添加新视频</h2>
+            <div className="flex flex-col sm:flex-row gap-4 items-end">
+              <div className="flex-1 w-full">
+                <label className="block text-sm font-medium text-gray-500 mb-2">视频链接</label>
+                <Input
+                  type="text"
+                  placeholder="粘贴抖音 / 快手 / 视频号链接"
+                  value={newUrl}
+                  onChange={(e) => setNewUrl(e.target.value)}
+                  className="rounded-2xl bg-white border-0 px-4 py-3 h-auto text-gray-900 text-sm focus:ring-2 focus:ring-gray-200"
+                />
+              </div>
+              <div className="w-full sm:w-44">
+                <label className="block text-sm font-medium text-gray-500 mb-2">平台</label>
+                <Select value={selectedPlatform} onValueChange={setSelectedPlatform}>
+                  <SelectTrigger className="rounded-2xl bg-white border-0 px-4 py-3 h-auto text-gray-900 text-sm focus:ring-2 focus:ring-gray-200">
+                    <SelectValue placeholder="选择平台" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {platforms.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                onClick={handleAddVideo}
+                disabled={submitting}
+                className="w-full sm:w-auto px-7 py-3 h-auto rounded-full text-sm font-medium"
               >
-                {platforms.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+                {submitting ? "添加中..." : "添加监控"}
+              </Button>
             </div>
-            <button
-              onClick={handleAddVideo}
-              className="w-full sm:w-auto px-7 py-3 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 active:scale-95 transition-all"
-            >
-              添加监控
-            </button>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Video List */}
-        <div className="bg-gray-50 rounded-3xl p-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-medium text-gray-900">监控中的视频</h2>
-            <span className="text-sm text-gray-400">{videos.length} 个</span>
-          </div>
-          <div className="space-y-3">
-            {videos.map((video) => {
-              const platform = platforms.find((p) => p.id === video.platform);
-              return (
-                <div
-                  key={video.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-white rounded-2xl hover:shadow-[0_4px_24px_rgba(0,0,0,0.06)] transition-all gap-4"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-medium">
-                        {platform?.abbr}
-                      </span>
-                      <span className="font-medium text-gray-900 truncate">{video.title}</span>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusStyle(video.status)}`}>
-                        {getStatusLabel(video.status)}
-                      </span>
-                    </div>
-                    <div className="mt-2 text-sm text-gray-400">
-                      {video.author} · {video.comments} 条评论 · {video.highIntent} 高意向
-                    </div>
-                    <div className="mt-1 text-xs text-gray-300 truncate">{video.url}</div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <Link href={`/dashboard/comments?videoId=${video.id}`}>
-                      <button className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 active:scale-95 transition-all">
-                        查看评论
-                      </button>
-                    </Link>
-                    <button
-                      onClick={() => toggleStatus(video.id)}
-                      className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-full hover:bg-gray-200 active:scale-95 transition-all"
-                    >
-                      {video.status === "MONITORING" ? "暂停" : "恢复"}
-                    </button>
-                  </div>
+        <Card className="rounded-3xl border-0 shadow-none bg-gray-50">
+          <CardHeader className="flex flex-row items-center justify-between px-8 pt-8 pb-0">
+            <CardTitle className="text-lg font-medium text-gray-900">监控中的视频</CardTitle>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={exportToCSV}
+                disabled={videos.length === 0}
+                className="rounded-full px-4 py-2 h-auto text-xs text-gray-500"
+              >
+                导出 CSV
+              </Button>
+              <span className="text-sm text-gray-400">{videos.length} 个</span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-8">
+            {loading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-24 w-full rounded-2xl" />
+                ))}
+              </div>
+            ) : videos.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+                  <span className="text-2xl">📹</span>
                 </div>
-              );
-            })}
-          </div>
-        </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">还没有监控视频</h3>
+                <p className="text-sm text-gray-400">添加第一个视频链接，开始自动监控评论区</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {videos.map((video) => {
+                  const platform = platforms.find((p) => p.id === video.platform);
+                  const status = statusMap[video.status] || { label: video.status, variant: "outline" };
+                  return (
+                    <Card
+                      key={video.id}
+                      className="rounded-2xl border-0 shadow-sm hover:shadow-[0_4px_24px_rgba(0,0,0,0.06)] transition-all"
+                    >
+                      <CardContent className="p-5">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-medium">
+                                {platform?.abbr}
+                              </span>
+                              <span className="font-medium text-gray-900 truncate">{video.title}</span>
+                              <Badge variant={status.variant} className="rounded-full">{status.label}</Badge>
+                            </div>
+                            <div className="mt-2 text-sm text-gray-400">
+                              {video.author} · {video.comments} 条评论 · {video.highIntent} 高意向 · {formatLastScraped(video.lastScrapedAt)}
+                            </div>
+                            <div className="mt-1 text-xs text-gray-300 truncate">{video.url}</div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <Button asChild className="rounded-full px-4 py-2 h-auto text-sm">
+                              <Link href={`/dashboard/comments?videoId=${video.id}`}>查看评论</Link>
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleScrapeNow(video.id)}
+                              disabled={scrapingIds.has(video.id)}
+                              className="rounded-full px-4 py-2 h-auto text-sm"
+                            >
+                              {scrapingIds.has(video.id) ? "抓取中..." : "立即抓取"}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => toggleStatus(video.id, video.status)}
+                              className="rounded-full px-4 py-2 h-auto text-sm"
+                            >
+                              {video.status === "MONITORING" ? "暂停" : "恢复"}
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              onClick={() => setDeleteTarget(video)}
+                              className="rounded-full px-4 py-2 h-auto text-sm"
+                            >
+                              删除
+                            </Button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </main>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              确定要删除视频「{deleteTarget?.title}」吗？相关评论、回复和私信记录也会一并删除，此操作无法撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-3 sm:justify-end">
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+              className="rounded-full px-6 py-2.5 h-auto text-sm"
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={deleting}
+              className="rounded-full px-6 py-2.5 h-auto text-sm"
+            >
+              {deleting ? "删除中..." : "确认删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

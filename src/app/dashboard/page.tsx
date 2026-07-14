@@ -2,33 +2,142 @@
 
 import { useSession } from "next-auth/react";
 import { Navbar } from "@/components/layout/Navbar";
-import { Card, CardHeader, CardBody } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { useToast } from "@/components/ui/Toast";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/use-toast";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { CollapsibleCard } from "@/components/ui/collapsible-card";
 
-const stats = [
-  { label: "监控视频", value: "5", change: "+2" },
-  { label: "抓取评论", value: "1,234", change: "+156" },
-  { label: "高意向用户", value: "89", change: "需处理" },
-  { label: "今日获客", value: "12", change: "+3" },
-];
+interface DashboardStats {
+  videos: number;
+  comments: number;
+  highIntent: number;
+  replies: number;
+  dms: number;
+  converted: number;
+}
 
-const recentVideos = [
-  { id: "1", title: "花艺教程：玫瑰包装技巧", platform: "抖音", views: "1.2万", status: "MONITORING", comments: 234, highIntent: 12, replied: 8, dmSent: 3 },
-  { id: "2", title: "新手开店：花店选址攻略", platform: "抖音", views: "8,500", status: "MONITORING", comments: 156, highIntent: 8, replied: 5, dmSent: 2 },
-];
+interface FunnelStep {
+  label: string;
+  value: number;
+  percent: string;
+}
 
-const highIntentUsers = [
-  { id: "1", name: "用户A", comment: "多少钱？能便宜吗？", score: 5, time: "2分钟前", avatar: "A" },
-  { id: "2", name: "用户B", comment: "怎么联系你？想学花艺", score: 4, time: "5分钟前", avatar: "B" },
-  { id: "3", name: "用户C", comment: "在哪里可以买到？", score: 4, time: "10分钟前", avatar: "C" },
-];
+interface HighIntentUser {
+  id: string;
+  name: string;
+  comment: string;
+  score: number;
+  time: string;
+  avatar: string;
+}
+
+interface Video {
+  id: string;
+  url: string;
+  platform: string;
+  title: string;
+  author: string;
+  status: string;
+  comments: number;
+  highIntent: number;
+  createdAt: string;
+}
+
+interface ApiComment {
+  id: string;
+  authorName: string;
+  content: string;
+  intentScore: number;
+  createdAt: string;
+}
+
+const platformNames: Record<string, string> = {
+  DOUYIN: '抖音',
+  KUAISHOU: '快手',
+  SHIPINHAO: '视频号',
+};
+
+const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  MONITORING: { label: "监控中", variant: "default" },
+  PAUSED: { label: "已暂停", variant: "secondary" },
+  ERROR: { label: "异常", variant: "destructive" },
+};
+
+function formatRelativeTime(dateString: string) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  return `${Math.floor(diff / 86400)} 天前`;
+}
 
 export default function DashboardPage() {
   const { data: session } = useSession();
   const { addToast } = useToast();
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [highIntentUsers, setHighIntentUsers] = useState<HighIntentUser[]>([]);
+  const [stats, setStats] = useState<DashboardStats>({
+    videos: 0,
+    comments: 0,
+    highIntent: 0,
+    replies: 0,
+    dms: 0,
+    converted: 0,
+  });
+  const [funnel, setFunnel] = useState<FunnelStep[]>([]);
+  const [activities, setActivities] = useState<{ id: string; type: string; description: string; createdAt: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/videos'),
+      fetch('/api/comments?intent=high'),
+      fetch('/api/dashboard/stats'),
+      fetch('/api/activities'),
+    ])
+      .then(async ([videosRes, commentsRes, statsRes, activitiesRes]) => {
+        const videosData = await videosRes.json();
+        const commentsData = await commentsRes.json();
+        const statsData = await statsRes.json();
+        const activitiesData = await activitiesRes.json();
+        setVideos(videosData.videos || []);
+        setHighIntentUsers(
+          (commentsData.comments || []).slice(0, 5).map((comment: ApiComment) => ({
+            id: comment.id,
+            name: comment.authorName,
+            comment: comment.content,
+            score: comment.intentScore,
+            time: formatRelativeTime(comment.createdAt),
+            avatar: comment.authorName[0] || '?',
+          }))
+        );
+        setStats(statsData.stats || { videos: 0, comments: 0, highIntent: 0, replies: 0, dms: 0, converted: 0 });
+        setFunnel(statsData.funnel || []);
+        setActivities(activitiesData.items || []);
+      })
+      .catch((error) => {
+        console.error('Fetch dashboard error:', error);
+        addToast('获取数据失败', 'error');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [addToast]);
+
+  const statCards = [
+    { label: "监控视频", value: String(stats.videos), change: "+0" },
+    { label: "抓取评论", value: String(stats.comments), change: "+0" },
+    { label: "高意向用户", value: String(stats.highIntent), change: "需处理" },
+    { label: "今日获客", value: String(stats.converted), change: "+0" },
+  ];
+
+  const recentVideos = videos.slice(0, 3);
 
   return (
     <div className="min-h-screen bg-white font-sans">
@@ -45,15 +154,17 @@ export default function DashboardPage() {
 
         {/* Stats Grid - Apple Style */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          {stats.map((stat) => (
-            <div
+          {statCards.map((stat) => (
+            <Card
               key={stat.label}
-              className="bg-gray-50 rounded-3xl p-6 hover:bg-gray-100 transition-colors"
+              className="rounded-3xl border-0 shadow-none bg-gray-50 hover:bg-gray-100 transition-colors"
             >
-              <div className="text-3xl font-bold text-gray-900 tracking-tight">{stat.value}</div>
-              <div className="text-sm text-gray-400 mt-1">{stat.label}</div>
-              <div className="text-xs text-gray-400 mt-2 font-medium">{stat.change}</div>
-            </div>
+              <CardContent className="p-6">
+                <div className="text-3xl font-bold text-gray-900 tracking-tight">{stat.value}</div>
+                <div className="text-sm text-gray-400 mt-1">{stat.label}</div>
+                <div className="text-xs text-gray-400 mt-2 font-medium">{stat.change}</div>
+              </CardContent>
+            </Card>
           ))}
         </div>
 
@@ -61,144 +172,203 @@ export default function DashboardPage() {
           {/* Left Column - Videos & Users */}
           <div className="lg:col-span-2 space-y-8">
             {/* Recent Videos */}
-            <div className="bg-gray-50 rounded-3xl p-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">最近监控的视频</h2>
+            <CollapsibleCard
+              title="最近监控的视频"
+              defaultOpen={true}
+              headerAction={
                 <Link href="/dashboard/videos" className="text-sm text-gray-400 hover:text-gray-900 transition-colors">
                   查看全部
                 </Link>
-              </div>
-              <div className="space-y-4">
-                {recentVideos.map((video) => (
-                  <div
-                    key={video.id}
-                    className="flex items-center justify-between p-4 bg-white rounded-2xl hover:shadow-sm transition-shadow"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3">
-                        <span className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">V</span>
-                        <span className="font-medium text-gray-900 truncate">{video.title}</span>
-                        <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">监控中</span>
-                      </div>
-                      <div className="mt-2 text-sm text-gray-400">
-                        {video.platform} · {video.views}播放 · 评论 {video.comments} · 高意向 {video.highIntent}
-                      </div>
-                    </div>
-                    <div className="ml-4 flex-shrink-0">
-                      <Link href={`/dashboard/comments?videoId=${video.id}`}>
-                        <Button size="sm">查看</Button>
-                      </Link>
-                    </div>
+              }
+            >
+                {loading ? (
+                  <div className="space-y-4">
+                    {[1, 2].map((i) => (
+                      <Skeleton key={i} className="h-20 w-full rounded-2xl" />
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
+                ) : recentVideos.length === 0 ? (
+                  <div className="text-center py-12">
+                    <p className="text-sm text-gray-400">暂无监控视频</p>
+                    <Link href="/dashboard/videos" className="text-sm text-gray-900 hover:text-gray-600 mt-2 inline-block">
+                      添加第一个监控视频 →
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {recentVideos.map((video) => {
+                      const status = statusMap[video.status] || { label: video.status, variant: "outline" };
+                      return (
+                        <Card key={video.id} className="rounded-2xl border-0 shadow-sm hover:shadow-sm transition-shadow">
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-3">
+                                  <span className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">V</span>
+                                  <span className="font-medium text-gray-900 truncate">{video.title}</span>
+                                  <Badge variant={status.variant} className="rounded-full">{status.label}</Badge>
+                                </div>
+                                <div className="mt-2 text-sm text-gray-400">
+                                  {platformNames[video.platform] || video.platform} · 评论 {video.comments} · 高意向 {video.highIntent}
+                                </div>
+                              </div>
+                              <div className="ml-4 flex-shrink-0">
+                                <Link href={`/dashboard/comments?videoId=${video.id}`}>
+                                  <Button size="sm">查看</Button>
+                                </Link>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+            </CollapsibleCard>
 
             {/* High Intent Users */}
-            <div className="bg-gray-50 rounded-3xl p-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">高意向用户</h2>
-                <button
-                  className="text-sm text-gray-400 hover:text-gray-900 transition-colors"
-                  onClick={() => addToast("已标记所有用户为已处理", "success")}
-                >
-                  全部标记
-                </button>
-              </div>
-              <div className="space-y-4">
-                {highIntentUsers.map((user) => (
-                  <div
-                    key={user.id}
-                    className="flex items-start justify-between p-4 bg-white rounded-2xl"
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-white text-sm font-medium">
-                          {user.avatar}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-gray-900">{user.name}</span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${user.score === 5 ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                              {user.score === 5 ? "强意向" : "高意向"} {user.score}分
-                            </span>
-                          </div>
-                          <div className="text-sm text-gray-500 mt-1">&ldquo;{user.comment}&rdquo;</div>
-                          <div className="text-xs text-gray-400 mt-1">{user.time}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      <Button
-                        size="sm"
-                        onClick={() => addToast(`已回复 ${user.name}`, "success")}
-                      >
-                        回复
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => addToast(`已忽略 ${user.name}`, "info")}
-                      >
-                        忽略
-                      </Button>
-                    </div>
+            <CollapsibleCard
+              title="高意向用户"
+              defaultOpen={true}
+              headerAction={
+                <Link href="/dashboard/comments?intent=high" className="text-sm text-gray-400 hover:text-gray-900 transition-colors">
+                  查看全部
+                </Link>
+              }
+            >
+                {loading ? (
+                  <div className="space-y-4">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-20 w-full rounded-2xl" />
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
+                ) : highIntentUsers.length === 0 ? (
+                  <div className="text-center py-12">
+                    <p className="text-sm text-gray-400">暂无高意向用户</p>
+                    <Link href="/dashboard/videos" className="text-sm text-gray-900 hover:text-gray-600 mt-2 inline-block">
+                      添加视频监控，自动识别高意向 →
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {highIntentUsers.map((user) => (
+                      <Card key={user.id} className="rounded-2xl border-0 shadow-sm">
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-white text-sm font-medium">
+                                  {user.avatar}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-gray-900">{user.name}</span>
+                                    <Badge variant={user.score === 5 ? "destructive" : "default"} className="rounded-full text-xs">
+                                      {user.score === 5 ? "强意向" : "高意向"} {user.score}分
+                                    </Badge>
+                                  </div>
+                                  <div className="text-sm text-gray-500 mt-1 truncate">&ldquo;{user.comment}&rdquo;</div>
+                                  <div className="text-xs text-gray-400 mt-1">{user.time}</div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                              <Link href={`/dashboard/comments?highlight=${user.id}`}>
+                                <Button size="sm">回复</Button>
+                              </Link>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+            </CollapsibleCard>
           </div>
 
           {/* Right Column - Funnel & Quick Actions */}
           <div className="space-y-8">
             {/* Conversion Funnel */}
-            <div className="bg-gray-50 rounded-3xl p-8">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">转化漏斗</h2>
-              <div className="space-y-5">
-                {[
-                  { label: "评论", value: 1234, percent: "100%", color: "bg-gray-900" },
-                  { label: "高意向", value: 89, percent: "7.2%", color: "bg-gray-600" },
-                  { label: "已回复", value: 56, percent: "4.5%", color: "bg-gray-500" },
-                  { label: "已私信", value: 34, percent: "2.8%", color: "bg-gray-400" },
-                  { label: "加微信", value: 12, percent: "1.0%", color: "bg-gray-300" },
-                ].map((step, idx, arr) => (
-                  <div key={step.label}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-700">{step.label}</span>
-                      <span className="text-sm text-gray-400">{step.value}</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className={`${step.color} h-2 rounded-full transition-all`}
-                        style={{ width: `${(step.value / arr[0].value) * 100}%` }}
-                      />
-                    </div>
+            <CollapsibleCard title="转化漏斗" defaultOpen={true}>
+                {loading ? (
+                  <div className="space-y-4">
+                    {[1, 2, 3, 4, 5].map((i) => (
+                      <Skeleton key={i} className="h-10 w-full rounded-xl" />
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
+                ) : funnel.length === 0 ? (
+                  <div className="text-center py-12 text-sm text-gray-400">暂无数据</div>
+                ) : (
+                  <div className="space-y-5">
+                    {funnel.map((step, idx, arr) => {
+                      const colors = ["bg-gray-900", "bg-gray-600", "bg-gray-500", "bg-gray-400", "bg-gray-300"];
+                      const maxValue = arr[0]?.value || 1;
+                      return (
+                        <div key={step.label}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-gray-700">{step.label}</span>
+                            <div className="text-sm text-gray-400">
+                              {step.value} <span className="text-xs ml-1">({step.percent})</span>
+                            </div>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div
+                              className={`${colors[idx] || colors[colors.length - 1]} h-2 rounded-full transition-all`}
+                              style={{ width: `${Math.max((step.value / maxValue) * 100, 2)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+            </CollapsibleCard>
 
             {/* Quick Actions */}
-            <div className="bg-gray-50 rounded-3xl p-8">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">快捷操作</h2>
-              <div className="space-y-3">
-                <Link href="/dashboard/videos" className="block">
-                  <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
-                    <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">V</span> 添加监控视频
-                  </Button>
-                </Link>
-                <Link href="/dashboard/templates" className="block">
-                  <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
-                    <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">T</span> 管理话术模板
-                  </Button>
-                </Link>
-                <Link href="/dashboard/analytics" className="block">
-                  <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
-                    <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">D</span> 查看数据报表
-                  </Button>
-                </Link>
-              </div>
-            </div>
+            <CollapsibleCard title="快捷操作" defaultOpen={true}>
+                <div className="space-y-3">
+                  <Link href="/dashboard/videos" className="block">
+                    <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
+                      <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">V</span> 添加监控视频
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/templates" className="block">
+                    <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
+                      <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">T</span> 管理话术模板
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/analytics" className="block">
+                    <Button className="w-full justify-start bg-white hover:bg-gray-100" variant="secondary">
+                      <span className="mr-3 w-5 h-5 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">D</span> 查看数据报表
+                    </Button>
+                  </Link>
+                </div>
+            </CollapsibleCard>
+
+            {/* Recent Activities */}
+            <CollapsibleCard title="最近动态" defaultOpen={false}>
+                {loading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-10 w-full rounded-xl" />
+                    ))}
+                  </div>
+                ) : activities.length === 0 ? (
+                  <div className="text-center py-8 text-sm text-gray-400">暂无动态</div>
+                ) : (
+                  <div className="space-y-4">
+                    {activities.map((activity) => (
+                      <div key={activity.id} className="flex items-start gap-3 text-sm">
+                        <span className="w-2 h-2 rounded-full bg-gray-400 mt-1.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-gray-700">{activity.description}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{formatRelativeTime(activity.createdAt)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </CollapsibleCard>
           </div>
         </div>
       </main>
