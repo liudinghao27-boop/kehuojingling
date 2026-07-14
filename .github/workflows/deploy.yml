@@ -9,6 +9,24 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kehuojingling
+          POSTGRES_PASSWORD: kehuojingling
+          POSTGRES_DB: kehuojingling_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://kehuojingling:kehuojingling@localhost:5432/kehuojingling_test?schema=public
+      NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+      AI_API_KEY_ENCRYPTION_KEY: ${{ secrets.AI_API_KEY_ENCRYPTION_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,9 +41,11 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Push test database schema
+        run: npx prisma db push --accept-data-loss
+
       - name: Run tests
         run: npm test
-        continue-on-error: true
 
       - name: Deploy to Vercel
         uses: vercel/action-deploy@v1

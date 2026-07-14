@@ -6,37 +6,39 @@
 
 ## 本次完成
 
-### 1. 本地噪音规则可配置
-- `User` 表新增 `noiseRules` JSON 字段
-- 生成 migration：`20260714182248_add_noise_rules`
-- `src/lib/ai/noise.ts`：
-  - 新增 `NoiseRules` 类型与 `DEFAULT_NOISE_RULES`
-  - `classifyNoiseLocal` 支持读取用户自定义规则
-  - `NOISE_SYSTEM_PROMPT` 改为 `buildNoiseSystemPrompt`，注入用户规则和行业场景
-  - `analyzeComments` 签名扩展 `noiseRules` 参数
-- 扩展 NextAuth session/jwt，设置页可直接读取当前规则
-- 扩展 `/api/user/profile` API，支持保存噪音规则（每类最多 50 个，每个最长 20 字符）
-- 设置页「AI 模型配置」新增噪音规则编辑器：
-  - 5 个 textarea 分别编辑：同行/广告/诈骗/纯情绪/无关
-  - 支持换行或逗号分隔关键词
-  - 提供「恢复默认规则」按钮
-  - 保存按钮即时生效
-- 后端调用点传递规则：
-  - `src/app/api/scrape/comments/route.ts`
-  - `src/app/api/ai/analyze/route.ts`（GET 批量分析）
+### 核心 API 测试覆盖
+- 选型：**Vitest** + 真实 PostgreSQL 测试库 `kehuojingling_test`
+- 新增配置：
+  - `vitest.config.ts`：路径 alias、`fileParallelism: false`、测试数据库环境变量
+  - `package.json`：`npm test` / `npm run test:watch` 脚本
+- 新增测试基础设施：
+  - `src/lib/test/setup.ts`：测试库连接、全局 `clearDatabase`
+  - `src/lib/test/factories.ts`：`createUser` / `createVideo` / `createComment`
+- 新增 API 测试（共 27 个用例）：
+  - `src/app/api/comments/route.test.ts`（10 个）：认证、分页、videoId/status/intent/noise/关键词过滤、用户隔离
+  - `src/app/api/ai/analyze/route.test.ts`（9 个）：POST 单条分析、commentId 更新、阈值判断；GET 批量分析、NEW 状态过滤
+  - `src/app/api/scrape/comments/route.test.ts`（8 个）：参数校验、URL 解析、抓取并保存高意向评论、过滤低意向/噪音、GET 列表
+- Mock 策略：
+  - `next-auth` 的 `getServerSession`
+  - `@/lib/ai/noise`、`@/lib/ai/intent`
+  - `@/lib/scraper/douyin`
+- CI 更新：
+  - `.github/workflows/deploy.yml` 添加 PostgreSQL service
+  - 设置 `DATABASE_URL`、先 `prisma db push` 再跑测试
+  - 移除 `continue-on-error: true`
 
-### 2. 验证
-- `npx prisma generate` 成功
-- `npm run lint` 通过
-- `npx tsc --noEmit` 通过
-- `npm run build` 通过
+### 验证
+- `npm test`：27 个用例全部通过
+- `npm run lint`：通过
+- `npx tsc --noEmit`：通过
+- `npm run build`：通过
 
 ## 当前运行状态
 - 获客精灵：`http://localhost:3000` ✅
 - 抓取服务：`http://localhost:8000` ✅
 - 本地数据库：`localhost:5432` ✅
 - 本地 Redis：`localhost:6379` ✅
-- DeepSeek Key：已加密存储 ✅
+- 测试数据库：`kehuojingling_test` ✅
 
 ## 开发命令
 
@@ -47,6 +49,9 @@ cd /e/ai/YJ-HUOKE && docker compose up -d
 # 一键启动 Next.js + 抓取服务
 cd /e/ai/YJ-HUOKE && npm run dev:all
 
+# 运行测试
+cd /e/ai/YJ-HUOKE && npm test
+
 # 如需单独启动
 cd /e/ai/YJ-HUOKE && npm run dev:clean       # 仅 Next.js
 cd /e/ai/YJ-HUOKE && npm run dev:scraper     # 仅抓取服务
@@ -55,4 +60,4 @@ cd /e/ai/YJ-HUOKE && npm run dev:scraper     # 仅抓取服务
 ## 已知问题 / 后续
 - 抖音自动回复/私信依赖真实 Cookie 和 Playwright，生产需单独维护
 - 抓取服务需独立部署，生产修改 `SCRAPER_API_URL`
-- 建议后续：两端口整合、核心 API 测试覆盖、AI 获客助手热词研究功能增强
+- 建议后续：两端口整合、AI 获客助手热词研究功能增强
