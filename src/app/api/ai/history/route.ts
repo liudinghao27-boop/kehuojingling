@@ -4,6 +4,14 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/db';
 import { z } from 'zod';
 
+const scoredKeywordSchema = z.object({
+  keyword: z.string(),
+  searchVolume: z.number().int().min(1).max(5),
+  competition: z.number().int().min(1).max(5),
+  businessIntent: z.number().int().min(1).max(5),
+  score: z.number().int().min(1).max(5),
+});
+
 const saveHistorySchema = z.object({
   title: z.string().optional(),
   industry: z.string().optional(),
@@ -14,11 +22,14 @@ const saveHistorySchema = z.object({
   painPoints: z.array(z.string()).default([]),
   competitorAccounts: z.array(z.string()).default([]),
   searchCommands: z.record(z.string(), z.array(z.string())).default({}),
+  scoredKeywords: z.array(scoredKeywordSchema).default([]),
   researchSummary: z.string().optional(),
   researchHotTopics: z.array(z.string()).default([]),
   researchPainPoints: z.array(z.string()).default([]),
   researchCompetitors: z.array(z.string()).default([]),
   researchKeywords: z.array(z.string()).default([]),
+  tags: z.array(z.string()).default([]),
+  isFavorite: z.boolean().default(false),
 });
 
 export async function GET() {
@@ -37,6 +48,8 @@ export async function GET() {
         title: true,
         industry: true,
         url: true,
+        tags: true,
+        isFavorite: true,
         createdAt: true,
       },
     });
@@ -79,11 +92,14 @@ export async function POST(req: NextRequest) {
         painPoints: data.painPoints,
         competitorAccounts: data.competitorAccounts,
         searchCommands: data.searchCommands,
+        scoredKeywords: data.scoredKeywords,
         researchSummary: data.researchSummary,
         researchHotTopics: data.researchHotTopics,
         researchPainPoints: data.researchPainPoints,
         researchCompetitors: data.researchCompetitors,
         researchKeywords: data.researchKeywords,
+        tags: data.tags,
+        isFavorite: data.isFavorite,
       },
     });
 

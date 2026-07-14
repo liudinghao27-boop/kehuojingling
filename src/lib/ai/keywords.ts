@@ -1,6 +1,14 @@
 import { createAIClient, getAIModel, hasAIKeyConfigured } from './client';
 import { getErrorMessage } from '../errors';
 
+export interface ScoredKeyword {
+  keyword: string;
+  searchVolume: number; // 1-5
+  competition: number; // 1-5
+  businessIntent: number; // 1-5
+  score: number; // 综合热度分 1-5，由 LLM 给出或本地计算
+}
+
 export interface KeywordResearchResult {
   combinedSearchQueries: string[];
   coreKeywords: string[];
@@ -13,6 +21,7 @@ export interface KeywordResearchResult {
     zhihu: string[];
     baidu: string[];
   };
+  scoredKeywords: ScoredKeyword[];
 }
 
 const SYSTEM_PROMPT = `你是一位通用的中文搜索意图与关键词优化专家。你的任务是根据用户输入的任意行业/产品/服务/人群描述，输出一份结构化、可直接用于社交媒体获客的关键词研究报告。
@@ -46,7 +55,16 @@ const SYSTEM_PROMPT = `你是一位通用的中文搜索意图与关键词优化
     "xiaohongshu": ["小红书搜索指令1", "小红书搜索指令2"],
     "zhihu": ["知乎搜索指令1", "知乎搜索指令2"],
     "baidu": ["百度搜索指令1", "百度搜索指令2"]
-  }
+  },
+  "scoredKeywords": [
+    {
+      "keyword": "关键词",
+      "searchVolume": 3,
+      "competition": 2,
+      "businessIntent": 5,
+      "score": 4
+    }
+  ]
 }
 
 # 输出要求
@@ -60,6 +78,12 @@ const SYSTEM_PROMPT = `你是一位通用的中文搜索意图与关键词优化
    - 小红书：经验/避坑/攻略/测评/怎么选
    - 知乎：怎么样/靠谱吗/是什么/经验/推荐
    - 百度：哪家好/费用/流程/排名/哪个好
+7. scoredKeywords（10-15 条）：从 coreKeywords 和 longTailKeywords 中挑选最具代表性的关键词，给出热度评分。评分标准（1-5 整数）：
+   - searchVolume：搜索量/关注度。5 表示非常高，1 表示很低。
+   - competition：竞争程度/内容饱和度。5 表示竞争极其激烈，1 表示蓝海。
+   - businessIntent：商业转化意向。5 表示用户即将购买/咨询，1 表示纯信息浏览。
+   - score：综合热度分，建议 = round((searchVolume + businessIntent - competition * 0.5) / 2)，结果限制在 1-5。
+   优先选择 score >= 3 的关键词，确保涵盖高搜索量、高商业意向、中等竞争的长尾词。
 
 # 禁止事项
 - 不要机械重复用户原句
@@ -101,7 +125,13 @@ export async function extractKeywordsWithAI(industry: string, apiKey?: string): 
   }
 }
 
-function normalizeResult(result: Record<string, unknown>): KeywordResearchResult {
+function normalizeScore(value: unknown): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return 1;
+  return Math.max(1, Math.min(5, Math.round(num)));
+}
+
+export function normalizeResult(result: Record<string, unknown>): KeywordResearchResult {
   const searchCommands =
     typeof result.searchCommands === 'object' && result.searchCommands !== null
       ? (result.searchCommands as Record<string, unknown>)
@@ -112,6 +142,24 @@ function normalizeResult(result: Record<string, unknown>): KeywordResearchResult
 
   const getCommandArray = (key: string): string[] =>
     Array.isArray(searchCommands[key]) ? (searchCommands[key] as unknown[]) as string[] : [];
+
+  const rawScored = Array.isArray(result.scoredKeywords) ? result.scoredKeywords : [];
+  const scoredKeywords: ScoredKeyword[] = rawScored
+    .map((item: unknown) => {
+      const entry = typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : {};
+      const searchVolume = normalizeScore(entry.searchVolume);
+      const competition = normalizeScore(entry.competition);
+      const businessIntent = normalizeScore(entry.businessIntent);
+      const score = entry.score !== undefined ? normalizeScore(entry.score) : Math.max(1, Math.min(5, Math.round((searchVolume + businessIntent - competition * 0.5) / 2)));
+      return {
+        keyword: typeof entry.keyword === 'string' ? entry.keyword : '',
+        searchVolume,
+        competition,
+        businessIntent,
+        score,
+      };
+    })
+    .filter((item) => item.keyword.length > 0);
 
   return {
     combinedSearchQueries: getStringArray('combinedSearchQueries'),
@@ -125,5 +173,6 @@ function normalizeResult(result: Record<string, unknown>): KeywordResearchResult
       zhihu: getCommandArray('zhihu'),
       baidu: getCommandArray('baidu'),
     },
+    scoredKeywords,
   };
 }

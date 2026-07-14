@@ -6,29 +6,37 @@
 
 ## 本次完成
 
-### 核心 API 测试覆盖
-- 选型：**Vitest** + 真实 PostgreSQL 测试库 `kehuojingling_test`
-- 新增配置：
-  - `vitest.config.ts`：路径 alias、`fileParallelism: false`、测试数据库环境变量
-  - `package.json`：`npm test` / `npm run test:watch` 脚本
-- 新增测试基础设施：
-  - `src/lib/test/setup.ts`：测试库连接、全局 `clearDatabase`
-  - `src/lib/test/factories.ts`：`createUser` / `createVideo` / `createComment`
-- 新增 API 测试（共 27 个用例）：
-  - `src/app/api/comments/route.test.ts`（10 个）：认证、分页、videoId/status/intent/noise/关键词过滤、用户隔离
-  - `src/app/api/ai/analyze/route.test.ts`（9 个）：POST 单条分析、commentId 更新、阈值判断；GET 批量分析、NEW 状态过滤
-  - `src/app/api/scrape/comments/route.test.ts`（8 个）：参数校验、URL 解析、抓取并保存高意向评论、过滤低意向/噪音、GET 列表
-- Mock 策略：
-  - `next-auth` 的 `getServerSession`
-  - `@/lib/ai/noise`、`@/lib/ai/intent`
-  - `@/lib/scraper/douyin`
-- CI 更新：
-  - `.github/workflows/deploy.yml` 添加 PostgreSQL service
-  - 设置 `DATABASE_URL`、先 `prisma db push` 再跑测试
-  - 移除 `continue-on-error: true`
+### AI 获客助手热词研究功能增强
+- 数据层：
+  - `prisma/schema.prisma`：
+    - `AiResearchHistory` 新增 `scoredKeywords Json?`、`tags String[]`、`isFavorite Boolean`、`updatedAt DateTime`
+    - 新增 `KeywordMonitor` 模型与 `User` 关联，用于「我的监控词库」
+  - 生成并应用 migration：`20260714184102_add_keyword_scoring_and_monitoring`
+- AI 层：
+  - `src/lib/ai/keywords.ts`：
+    - 新增 `ScoredKeyword` 类型与 `scoredKeywords` 字段
+    - Prompt 要求 LLM 为每个关键词输出搜索量、竞争度、商业意向、综合热度评分（1-5）
+    - `normalizeResult` 对评分做归一化、缺省兜底、空关键词过滤
+    - 导出 `normalizeResult` 便于单元测试
+- API 层：
+  - `src/app/api/ai/keywords/route.ts`：返回含 `scoredKeywords` 的研究结果
+  - `src/app/api/ai/history/route.ts`：保存/返回 `scoredKeywords`、`tags`、`isFavorite`
+  - `src/app/api/ai/history/[id]/route.ts`：新增 `PATCH` 支持修改标题、标签、收藏状态
+  - `src/app/api/keywords/monitor/route.ts`（新建）：监控词库的 GET/POST/DELETE
+- 前端层：
+  - `src/app/dashboard/ai-assistant/page.tsx`：
+    - 新增「热词评分」表格，支持按综合热度/搜索量/竞争度/商业意向排序
+    - 新增关键词复选框，可一键保存到「监控词库」
+    - 历史记录支持收藏、标题编辑、标签增删
+  - `src/components/ai-assistant/KeywordScoreChart.tsx`（新建）：recharts 柱状图展示 Top 10 热词
+- 测试层：
+  - `src/lib/ai/keywords.test.ts`：评分归一化测试
+  - `src/app/api/ai/keywords/route.test.ts`：关键词提取与额度限制测试
+  - `src/app/api/keywords/monitor/route.test.ts`：监控词库 CRUD 与用户隔离测试
+  - `src/app/api/ai/history/[id]/route.test.ts`：PATCH 更新与用户隔离测试
 
 ### 验证
-- `npm test`：27 个用例全部通过
+- `npm test`：45 个用例全部通过
 - `npm run lint`：通过
 - `npx tsc --noEmit`：通过
 - `npm run build`：通过
@@ -60,4 +68,4 @@ cd /e/ai/YJ-HUOKE && npm run dev:scraper     # 仅抓取服务
 ## 已知问题 / 后续
 - 抖音自动回复/私信依赖真实 Cookie 和 Playwright，生产需单独维护
 - 抓取服务需独立部署，生产修改 `SCRAPER_API_URL`
-- 建议后续：两端口整合、AI 获客助手热词研究功能增强
+- 监控词库当前仅保存，尚未与视频/评论监控模块打通，可作为下一阶段桥接点

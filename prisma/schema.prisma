@@ -19,7 +19,7 @@ model User {
   plan          Plan      @default(FREE)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  
+
   // 关联
   videos        Video[]
   replyTemplates ReplyTemplate[]
@@ -27,6 +27,7 @@ model User {
   activities    Activity[]
   aiResearchHistory AiResearchHistory[]
   platformCredentials PlatformCredential[]
+  keywordMonitors KeywordMonitor[]
 
   @@map("users")
 }
@@ -214,15 +215,35 @@ model AiResearchHistory {
   painPoints            String[]
   competitorAccounts    String[]
   searchCommands        Json?
+  scoredKeywords        Json?     // 含搜索量/竞争度/商业意向评分的关键词
   researchSummary       String?   @db.Text
   researchHotTopics     String[]
   researchPainPoints    String[]
   researchCompetitors   String[]
   researchKeywords      String[]
+  tags                  String[]  @default([])
+  isFavorite            Boolean   @default(false)
   createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([userId, isFavorite])
   @@map("ai_research_history")
+}
+
+model KeywordMonitor {
+  id        String   @id @default(cuid())
+  userId    String
+  keyword   String
+  source    String?  // 来源研究记录 ID
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, keyword])
+  @@index([userId, updatedAt])
+  @@map("keyword_monitors")
 }
