@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export default function RegisterPage() {
   const [name, setName] = useState('');
@@ -73,14 +75,14 @@ export default function RegisterPage() {
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
               昵称
             </label>
-            <input
+            <Input
               id="name"
               name="name"
               type="text"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="block w-full rounded-2xl bg-gray-50 border-0 px-4 py-3.5 text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200 transition-all"
+              className="rounded-2xl bg-gray-50 border-0 px-4 py-3.5 h-auto text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200"
               placeholder="您的昵称"
             />
           </div>
@@ -89,14 +91,14 @@ export default function RegisterPage() {
             <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
               邮箱
             </label>
-            <input
+            <Input
               id="email"
               name="email"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full rounded-2xl bg-gray-50 border-0 px-4 py-3.5 text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200 transition-all"
+              className="rounded-2xl bg-gray-50 border-0 px-4 py-3.5 h-auto text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200"
               placeholder="your@email.com"
             />
           </div>
@@ -105,14 +107,14 @@ export default function RegisterPage() {
             <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
               密码
             </label>
-            <input
+            <Input
               id="password"
               name="password"
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full rounded-2xl bg-gray-50 border-0 px-4 py-3.5 text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200 transition-all"
+              className="rounded-2xl bg-gray-50 border-0 px-4 py-3.5 h-auto text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200"
               placeholder="至少6位密码"
             />
           </div>
@@ -121,25 +123,25 @@ export default function RegisterPage() {
             <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
               确认密码
             </label>
-            <input
+            <Input
               id="confirmPassword"
               name="confirmPassword"
               type="password"
               required
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="block w-full rounded-2xl bg-gray-50 border-0 px-4 py-3.5 text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200 transition-all"
+              className="rounded-2xl bg-gray-50 border-0 px-4 py-3.5 h-auto text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200"
               placeholder="再次输入密码"
             />
           </div>
 
-          <button
+          <Button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 active:scale-95 transition-all disabled:opacity-50"
+            className="w-full py-3.5 h-auto rounded-full text-sm font-medium"
           >
             {loading ? '注册中...' : '创建账号'}
-          </button>
+          </Button>
         </form>
 
         <div className="mt-8 text-center">

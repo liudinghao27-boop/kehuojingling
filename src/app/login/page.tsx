@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -60,14 +62,14 @@ export default function LoginPage() {
             <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
               邮箱
             </label>
-            <input
+            <Input
               id="email"
               name="email"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full rounded-2xl bg-gray-50 border-0 px-4 py-3.5 text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200 transition-all"
+              className="rounded-2xl bg-gray-50 border-0 px-4 py-3.5 h-auto text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200"
               placeholder="your@email.com"
             />
           </div>
@@ -76,25 +78,25 @@ export default function LoginPage() {
             <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
               密码
             </label>
-            <input
+            <Input
               id="password"
               name="password"
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full rounded-2xl bg-gray-50 border-0 px-4 py-3.5 text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200 transition-all"
+              className="rounded-2xl bg-gray-50 border-0 px-4 py-3.5 h-auto text-gray-900 text-sm focus:bg-white focus:ring-2 focus:ring-gray-200"
               placeholder="••••••••"
             />
           </div>
 
-          <button
+          <Button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 active:scale-95 transition-all disabled:opacity-50"
+            className="w-full py-3.5 h-auto rounded-full text-sm font-medium"
           >
             {loading ? '登录中...' : '登录'}
-          </button>
+          </Button>
         </form>
 
         <div className="mt-8 text-center">

@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: ['bull', 'playwright'],
+  devIndicators: false,
 };
 
 export default nextConfig;

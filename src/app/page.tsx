@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export default function Home() {
   return (
@@ -16,12 +17,9 @@ export default function Home() {
             <Link href="/login" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
               登录
             </Link>
-            <Link
-              href="/register"
-              className="inline-flex items-center px-5 py-2 text-sm font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 transition-colors"
-            >
-              免费试用
-            </Link>
+            <Button asChild className="rounded-full px-5 py-2 h-auto">
+              <Link href="/register">免费试用</Link>
+            </Button>
           </div>
         </div>
       </nav>
@@ -38,18 +36,12 @@ export default function Home() {
             自动监控抖音、快手、视频号评论区，AI 识别高意向用户，自动触达并引导至私域
           </p>
           <div className="mt-12 flex flex-col sm:flex-row gap-4 justify-center">
-            <Link
-              href="/register"
-              className="inline-flex items-center justify-center px-8 py-4 text-base font-medium text-white bg-gray-900 rounded-full hover:bg-gray-800 transition-all active:scale-95"
-            >
-              立即免费开始
-            </Link>
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center justify-center px-8 py-4 text-base font-medium text-gray-900 bg-gray-50 rounded-full hover:bg-gray-100 transition-all active:scale-95"
-            >
-              查看演示
-            </Link>
+            <Button asChild size="lg" className="rounded-full px-8 py-4 h-auto text-base">
+              <Link href="/register">立即免费开始</Link>
+            </Button>
+            <Button asChild variant="secondary" size="lg" className="rounded-full px-8 py-4 h-auto text-base">
+              <Link href="/dashboard">查看演示</Link>
+            </Button>
           </div>
           <p className="mt-6 text-sm text-gray-400">无需信用卡，免费版永久可用</p>
         </div>
@@ -211,16 +203,13 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <Link
-                  href="/register"
-                  className={`mt-8 block w-full text-center py-3 rounded-full font-medium transition-colors ${
-                    plan.popular
-                      ? "bg-white text-gray-900 hover:bg-gray-100"
-                      : "bg-gray-900 text-white hover:bg-gray-800"
-                  }`}
+                <Button
+                  asChild
+                  variant={plan.popular ? "secondary" : "default"}
+                  className="mt-8 w-full rounded-full py-3 h-auto"
                 >
-                  {plan.popular ? "立即升级" : "免费开始"}
-                </Link>
+                  <Link href="/register">{plan.popular ? "立即升级" : "免费开始"}</Link>
+                </Button>
               </div>
             ))}
           </div>
