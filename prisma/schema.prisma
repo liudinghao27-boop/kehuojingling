@@ -10,7 +10,10 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   name          String?
+  phone         String?
   password      String
+  aiApiKey      String?   // 用户自定义 DeepSeek/OpenAI API Key
+  industryContext String? @db.Text // 业务场景描述，用于 AI 意向分析
   plan          Plan      @default(FREE)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -20,24 +23,43 @@ model User {
   replyTemplates ReplyTemplate[]
   dmTemplates   DmTemplate[]
   activities    Activity[]
-  
+  aiResearchHistory AiResearchHistory[]
+  platformCredentials PlatformCredential[]
+
   @@map("users")
 }
 
+model PlatformCredential {
+  id        String   @id @default(cuid())
+  userId    String
+  platform  Platform
+  cookies   String   @db.Text
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform])
+  @@map("platform_credentials")
+}
+
 model Video {
-  id          String    @id @default(cuid())
-  url         String
-  platform    Platform  @default(DOUYIN)
-  title       String?
-  author      String?
-  status      VideoStatus @default(MONITORING)
-  userId      String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
+  id                  String    @id @default(cuid())
+  url                 String
+  platform            Platform  @default(DOUYIN)
+  title               String?
+  author              String?
+  status              VideoStatus @default(MONITORING)
+  lastScrapedAt       DateTime?
+  consecutiveFailures Int       @default(0)
+  userId              String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
   user        User      @relation(fields: [userId], references: [id])
   comments    Comment[]
-  
+
   @@map("videos")
 }
 
@@ -48,6 +70,9 @@ model Comment {
   authorAvatar String?
   intentScore Int       @default(0) // 1-5
   intentKeywords String[]
+  isNoise     Boolean   @default(false)
+  noiseType   String?   // peer | vendor | scam | offtopic | emotional | none
+  noiseReason String?   @db.Text
   status      CommentStatus @default(NEW)
   videoId     String
   createdAt   DateTime  @default(now())
@@ -56,6 +81,7 @@ model Comment {
   replies     Reply[]
   dms         Dm[]
   
+  @@index([videoId, isNoise])
   @@map("comments")
 }
 
@@ -172,4 +198,29 @@ enum ActivityType {
   DM_SENT
   USER_CONVERTED
   ERROR
+}
+
+model AiResearchHistory {
+  id                    String    @id @default(cuid())
+  userId                String
+  title                 String?
+  industry              String?
+  url                   String?
+  combinedSearchQueries String[]
+  coreKeywords          String[]
+  longTailKeywords      String[]
+  painPoints            String[]
+  competitorAccounts    String[]
+  searchCommands        Json?
+  researchSummary       String?   @db.Text
+  researchHotTopics     String[]
+  researchPainPoints    String[]
+  researchCompetitors   String[]
+  researchKeywords      String[]
+  createdAt             DateTime  @default(now())
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("ai_research_history")
 }
