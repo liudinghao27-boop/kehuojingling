@@ -6,17 +6,24 @@
 
 ## 本次完成
 
-### 1. 意向分阈值可配置
-- `User` 表新增 `intentScoreThreshold` 字段（默认 4，范围 1-5）
-- 生成 migration：`20260714181728_add_intent_score_threshold`
-- 扩展 NextAuth session/jwt，设置页可直接读取当前阈值
-- 扩展 `/api/user/profile` API，支持单独更新阈值
-- 设置页「AI 模型配置」新增 1-5 分段阈值选择器，点击即保存
-- 后端逻辑全面使用用户阈值替代硬编码 4：
-  - 单条/批量意向分析：`score >= threshold ? 'ANALYZED' : 'NEW'`
-  - 抓取评论过滤：丢弃 `score < threshold` 的评论
-  - 评论列表「高意向」筛选：`intentScore >= threshold`
-  - 视频高意向统计按阈值计算
+### 1. 本地噪音规则可配置
+- `User` 表新增 `noiseRules` JSON 字段
+- 生成 migration：`20260714182248_add_noise_rules`
+- `src/lib/ai/noise.ts`：
+  - 新增 `NoiseRules` 类型与 `DEFAULT_NOISE_RULES`
+  - `classifyNoiseLocal` 支持读取用户自定义规则
+  - `NOISE_SYSTEM_PROMPT` 改为 `buildNoiseSystemPrompt`，注入用户规则和行业场景
+  - `analyzeComments` 签名扩展 `noiseRules` 参数
+- 扩展 NextAuth session/jwt，设置页可直接读取当前规则
+- 扩展 `/api/user/profile` API，支持保存噪音规则（每类最多 50 个，每个最长 20 字符）
+- 设置页「AI 模型配置」新增噪音规则编辑器：
+  - 5 个 textarea 分别编辑：同行/广告/诈骗/纯情绪/无关
+  - 支持换行或逗号分隔关键词
+  - 提供「恢复默认规则」按钮
+  - 保存按钮即时生效
+- 后端调用点传递规则：
+  - `src/app/api/scrape/comments/route.ts`
+  - `src/app/api/ai/analyze/route.ts`（GET 批量分析）
 
 ### 2. 验证
 - `npx prisma generate` 成功
@@ -47,4 +54,4 @@ cd /e/ai/YJ-HUOKE && npm run dev:clean
 ## 已知问题 / 后续
 - 抖音自动回复/私信依赖真实 Cookie 和 Playwright，生产需单独维护
 - 抓取服务需独立部署，生产修改 `SCRAPER_API_URL`
-- 建议后续：本地噪音规则可配置、两端口整合、核心 API 测试覆盖
+- 建议后续：两端口整合、核心 API 测试覆盖、AI 获客助手热词研究功能增强

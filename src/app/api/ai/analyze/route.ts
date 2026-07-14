@@ -87,11 +87,12 @@ export async function GET(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true },
+      select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true, noiseRules: true },
     });
 
     const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
     const threshold = user?.intentScoreThreshold ?? 4;
+    const noiseRules = user?.noiseRules as import('@/lib/ai/noise').NoiseRules | undefined;
 
     // 获取未分析的评论
     const comments = await prisma.comment.findMany({
@@ -106,7 +107,8 @@ export async function GET(req: NextRequest) {
     const analyses = await analyzeComments(
       contents,
       user?.industryContext || undefined,
-      aiApiKey
+      aiApiKey,
+      noiseRules
     );
 
     const results = [];

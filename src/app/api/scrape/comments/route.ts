@@ -33,11 +33,12 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true },
+      select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true, noiseRules: true },
     });
 
     const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
     const threshold = user?.intentScoreThreshold ?? 4;
+    const noiseRules = user?.noiseRules as import('@/lib/ai/noise').NoiseRules | undefined;
 
     // 解析视频链接
     const parsedVideo = parseVideoUrl(url);
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
 
     // AI 分析评论意向并过滤白噪音
     const contents = scrapedComments.map(c => c.content);
-    const analyses = await analyzeComments(contents, user?.industryContext || undefined, aiApiKey);
+    const analyses = await analyzeComments(contents, user?.industryContext || undefined, aiApiKey, noiseRules);
 
     const savedComments = [];
     for (let i = 0; i < scrapedComments.length; i++) {

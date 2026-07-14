@@ -22,8 +22,54 @@ export interface NoiseAnalysis {
 
 export type CommentAnalysis = IntentAnalysis & NoiseAnalysis;
 
-const NOISE_SYSTEM_PROMPT = `你是一个社交媒体评论区「白噪音过滤」专家。
-你的任务是先判断评论是否属于「无效/低价值噪音」，再对非噪音评论进行意向评分。
+export interface NoiseRules {
+  peer: string[];
+  vendor: string[];
+  scam: string[];
+  emotional: string[];
+  offtopic: string[];
+}
+
+export const DEFAULT_NOISE_RULES: NoiseRules = {
+  peer: [
+    '包装', '求带', '教我做', '同行', '中介', '代办', '找我', '加我', '私信我', '私我',
+    '合作', '货源', '渠道', '培训', '课程', '资料', '招代理', '加盟', '我们也能做',
+    '帮你做', '我可以做', '需要的联系', '联系我', '免费咨询',
+  ],
+  vendor: ['加微信', '加v', '加q', '招商', '加盟', '代理', '批发', '采购', '售卖', '出售', '卖货'],
+  scam: ['黑户', '洗白', '套现', '刷流水', '包过', '必下', '无视征信', '裸贷'],
+  emotional: ['666', '厉害', '赞', '好', '顶', '支持', '哈哈', '不错'],
+  offtopic: [],
+};
+
+function mergeNoiseRules(rules?: Partial<NoiseRules>): NoiseRules {
+  return {
+    peer: rules?.peer ?? DEFAULT_NOISE_RULES.peer,
+    vendor: rules?.vendor ?? DEFAULT_NOISE_RULES.vendor,
+    scam: rules?.scam ?? DEFAULT_NOISE_RULES.scam,
+    emotional: rules?.emotional ?? DEFAULT_NOISE_RULES.emotional,
+    offtopic: rules?.offtopic ?? DEFAULT_NOISE_RULES.offtopic,
+  };
+}
+
+function formatRulesForPrompt(rules: NoiseRules): string {
+  const lines: string[] = [];
+  if (rules.peer.length) lines.push(`- peer（同行/服务商）：${rules.peer.join('、')}`);
+  if (rules.vendor.length) lines.push(`- vendor（广告/推销）：${rules.vendor.join('、')}`);
+  if (rules.scam.length) lines.push(`- scam（诈骗/黑灰产）：${rules.scam.join('、')}`);
+  if (rules.emotional.length) lines.push(`- emotional（纯情绪）：${rules.emotional.join('、')}`);
+  if (rules.offtopic.length) lines.push(`- offtopic（无关）：${rules.offtopic.join('、')}`);
+  return lines.length ? lines.join('\n') : '（无额外规则）';
+}
+
+function buildNoiseSystemPrompt(industryContext?: string, noiseRules?: Partial<NoiseRules>): string {
+  const rules = mergeNoiseRules(noiseRules);
+  const contextLine = industryContext
+    ? `\n当前业务场景：${industryContext}\n请结合该业务场景判断每条评论是否是真实客户，还是同行/广告/噪音。`
+    : '';
+
+  return `你是一个社交媒体评论区「白噪音过滤」专家。
+你的任务是先判断评论是否属于「无效/低价值噪音」，再对非噪音评论进行意向评分。${contextLine}
 
 # 噪音类型定义（适用于任何行业）
 - peer：同行、从业者、中介、服务商等 B 端身份的表态或引流。例如「有没有小白，我帮你包装」「同行交流一下」「我们也能做」「找我代办」。
@@ -32,6 +78,9 @@ const NOISE_SYSTEM_PROMPT = `你是一个社交媒体评论区「白噪音过滤
 - offtopic：与当前业务完全无关的闲聊、@朋友、网络段子、纯符号。
 - emotional：纯情绪表达，无实质信息。例如「666」「赞」「比心」「哈哈哈」「支持」。
 - none：不是噪音，可能是真实潜在客户。
+
+# 用户自定义关键词规则（遇到包含这些关键词的评论，优先按对应类型判断）
+${formatRulesForPrompt(rules)}
 
 # 判断原则
 1. 先结合业务场景看评论：这句话是不是终端客户在表达需求或提问？
@@ -70,51 +119,44 @@ const NOISE_SYSTEM_PROMPT = `你是一个社交媒体评论区「白噪音过滤
 
 如果 isNoise=true，则 score 固定为 1，category 固定为 "none"，keywords 为空数组。
  analyses 数组长度必须严格等于输入评论数量。`;
+}
 
-function buildUserPrompt(comments: string[], industryContext?: string): string {
-  const contextLine = industryContext
-    ? `\n当前业务场景：${industryContext}\n请结合该业务场景判断每条评论是否是真实客户，还是同行/广告/噪音。`
-    : '';
-
-  return `请批量分析以下 ${comments.length} 条评论：${contextLine}\n\n${comments
+function buildUserPrompt(comments: string[]): string {
+  return `请批量分析以下 ${comments.length} 条评论：\n\n${comments
     .map((c, i) => `${i + 1}. "${c}"`)
     .join('\n')}\n\n请严格按 JSON 格式返回 { "analyses": [...] }，不要输出其他内容。`;
 }
 
 // 本地兜底：通用噪音规则（不绑定具体行业，但覆盖常见中文社交媒体噪音）
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function classifyNoiseLocal(comment: string, _industryContext?: string): NoiseAnalysis {
+export function classifyNoiseLocal(
+  comment: string,
+  noiseRules?: Partial<NoiseRules>
+): NoiseAnalysis {
   const text = comment.toLowerCase();
+  const rules = mergeNoiseRules(noiseRules);
 
   // 同行/服务商
-  const peerPatterns = [
-    '包装', '求带', '教我做', '同行', '中介', '代办', '找我', '加我', '私信我', '私我',
-    '合作', '货源', '渠道', '培训', '课程', '资料', '招代理', '加盟', '我们也能做',
-    '帮你做', '我可以做', '需要的联系', '联系我', '免费咨询',
-  ];
-  for (const p of peerPatterns) {
-    if (text.includes(p)) {
+  for (const p of rules.peer) {
+    if (text.includes(p.toLowerCase())) {
       return { isNoise: true, noiseType: 'peer', noiseReason: `包含同行/服务商关键词「${p}」` };
     }
   }
 
   // 广告/推销
-  const vendorPatterns = ['加微信', '加v', '加q', '招商', '加盟', '代理', '批发', '采购', '售卖', '出售', '卖货'];
-  for (const p of vendorPatterns) {
-    if (text.includes(p)) {
+  for (const p of rules.vendor) {
+    if (text.includes(p.toLowerCase())) {
       return { isNoise: true, noiseType: 'vendor', noiseReason: `包含广告/推销关键词「${p}」` };
     }
   }
 
   // 诈骗/黑灰产
-  const scamPatterns = ['黑户', '洗白', '套现', '刷流水', '包过', '必下', '无视征信', '裸贷'];
-  for (const p of scamPatterns) {
-    if (text.includes(p)) {
+  for (const p of rules.scam) {
+    if (text.includes(p.toLowerCase())) {
       return { isNoise: true, noiseType: 'scam', noiseReason: `包含诈骗/黑灰产关键词「${p}」` };
     }
   }
 
-  // 纯表情或纯情绪
+  // 纯表情或纯情绪（保留系统默认正则 + 用户 emotional 关键词）
   const onlyEmojis = /^\s*[^\u4e00-\u9fa5a-zA-Z0-9\s]*(?:[赞比心了支持厉害哈哈666牛逼棒好]|\[.*\])*\s*$/;
   if (onlyEmojis.test(text) || text.length === 0) {
     return { isNoise: true, noiseType: 'emotional', noiseReason: '纯表情或纯情绪表达' };
@@ -128,8 +170,12 @@ export function classifyNoiseLocal(comment: string, _industryContext?: string): 
   return { isNoise: false, noiseType: 'none', noiseReason: '' };
 }
 
-function analyzeCommentLocal(comment: string, industryContext?: string): CommentAnalysis {
-  const noise = classifyNoiseLocal(comment, industryContext);
+function analyzeCommentLocal(
+  comment: string,
+  industryContext?: string,
+  noiseRules?: Partial<NoiseRules>
+): CommentAnalysis {
+  const noise = classifyNoiseLocal(comment, noiseRules);
   if (noise.isNoise) {
     return {
       ...noise,
@@ -146,18 +192,19 @@ function analyzeCommentLocal(comment: string, industryContext?: string): Comment
 export async function analyzeComments(
   comments: string[],
   industryContext?: string,
-  apiKey?: string
+  apiKey?: string,
+  noiseRules?: Partial<NoiseRules>
 ): Promise<CommentAnalysis[]> {
   if (!hasAIKeyConfigured(apiKey) || comments.length === 0) {
-    return comments.map(c => analyzeCommentLocal(c, industryContext));
+    return comments.map(c => analyzeCommentLocal(c, industryContext, noiseRules));
   }
 
   try {
     const response = await createAIClient(apiKey).chat.completions.create({
       model: getAIModel(),
       messages: [
-        { role: 'system', content: NOISE_SYSTEM_PROMPT },
-        { role: 'user', content: buildUserPrompt(comments, industryContext) },
+        { role: 'system', content: buildNoiseSystemPrompt(industryContext, noiseRules) },
+        { role: 'user', content: buildUserPrompt(comments) },
       ],
       temperature: 0.3,
       response_format: { type: 'json_object' },
@@ -186,7 +233,7 @@ export async function analyzeComments(
       const a = analyses[i];
       if (!a) {
         // AI 返回缺失时回退到本地规则，保证输出长度一致
-        mapped.push(analyzeCommentLocal(comments[i], industryContext));
+        mapped.push(analyzeCommentLocal(comments[i], industryContext, noiseRules));
         continue;
       }
       const isNoise = !!a.isNoise;
@@ -206,6 +253,6 @@ export async function analyzeComments(
     return mapped;
   } catch (error) {
     console.error('[Noise] Batch analysis error:', error);
-    return comments.map(c => analyzeCommentLocal(c, industryContext));
+    return comments.map(c => analyzeCommentLocal(c, industryContext, noiseRules));
   }
 }

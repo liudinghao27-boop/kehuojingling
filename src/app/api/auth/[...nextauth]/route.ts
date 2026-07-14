@@ -39,6 +39,7 @@ export const authOptions = {
           plan: user.plan,
           industryContext: user.industryContext,
           intentScoreThreshold: user.intentScoreThreshold,
+          noiseRules: user.noiseRules as unknown as import('@/lib/ai/noise').NoiseRules | undefined,
         };
       },
     }),
@@ -53,6 +54,7 @@ export const authOptions = {
         token.phone = user.phone;
         token.industryContext = user.industryContext;
         token.intentScoreThreshold = user.intentScoreThreshold;
+        token.noiseRules = user.noiseRules as unknown as import('@/lib/ai/noise').NoiseRules | undefined;
       }
 
       if (trigger === 'update' && session?.user) {
@@ -62,6 +64,7 @@ export const authOptions = {
         if (session.user.plan !== undefined) token.plan = session.user.plan;
         if (session.user.industryContext !== undefined) token.industryContext = session.user.industryContext;
         if (session.user.intentScoreThreshold !== undefined) token.intentScoreThreshold = session.user.intentScoreThreshold;
+        if (session.user.noiseRules !== undefined) token.noiseRules = session.user.noiseRules;
         if (session.user.platformCredentials !== undefined) {
           token.platformCredentials = session.user.platformCredentials;
         }
@@ -87,6 +90,7 @@ export const authOptions = {
         session.user.phone = token.phone as string | null;
         session.user.industryContext = token.industryContext as string | null;
         session.user.intentScoreThreshold = (token.intentScoreThreshold as number) ?? 4;
+        session.user.noiseRules = token.noiseRules as unknown as import('@/lib/ai/noise').NoiseRules | undefined;
         session.user.platformCredentials = (token.platformCredentials as string[]) || [];
       }
       return session;

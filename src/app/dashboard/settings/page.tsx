@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { User, Mail, Crown, Smartphone, Lock, Bookmark, Copy } from "lucide-react";
 import { getErrorMessage } from "@/lib/errors";
+import { DEFAULT_NOISE_RULES, type NoiseRules } from "@/lib/ai/noise";
 
 type PlatformCredential = {
   platform: string;
@@ -84,6 +85,9 @@ export default function SettingsPage() {
   const [bookmarkletPlatform, setBookmarkletPlatform] = useState<"DOUYIN" | "KUAISHOU" | "SHIPINHAO">("DOUYIN");
   const [showBookmarklet, setShowBookmarklet] = useState(false);
 
+  const [noiseRules, setNoiseRules] = useState<NoiseRules>(DEFAULT_NOISE_RULES);
+  const [noiseRulesSubmitting, setNoiseRulesSubmitting] = useState(false);
+
   const planLabel = session?.user?.plan === "FREE" ? "免费版" : session?.user?.plan;
   const phone = session?.user?.phone;
 
@@ -113,6 +117,7 @@ export default function SettingsPage() {
         industryContext: session.user.industryContext || "",
         intentScoreThreshold: session.user.intentScoreThreshold ?? 4,
       });
+      setNoiseRules(session.user.noiseRules ?? DEFAULT_NOISE_RULES);
     }
   }, [session?.user]);
 
@@ -243,6 +248,45 @@ export default function SettingsPage() {
     } finally {
       setProfileSubmitting(false);
     }
+  };
+
+  const handleNoiseRulesChange = (type: keyof NoiseRules, value: string) => {
+    setNoiseRules((prev) => ({
+      ...prev,
+      [type]: value
+        .split(/\n|,/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    }));
+  };
+
+  const handleSaveNoiseRules = async () => {
+    setNoiseRulesSubmitting(true);
+    try {
+      const res = await fetch("/api/user/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noiseRules }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "保存失败");
+      }
+
+      await update({
+        user: { noiseRules },
+      });
+
+      addToast("噪音过滤规则已保存", "success");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "保存噪音规则失败", "error");
+    } finally {
+      setNoiseRulesSubmitting(false);
+    }
+  };
+
+  const handleResetNoiseRules = () => {
+    setNoiseRules(DEFAULT_NOISE_RULES);
   };
 
   const handleSaveAiKey = async () => {
@@ -772,6 +816,51 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between text-xs text-gray-400 mt-2 max-w-[232px]">
                   <span>宽松</span>
                   <span>严格</span>
+                </div>
+              </div>
+
+              <div className="mt-6 pt-6 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-medium text-gray-900">噪音过滤规则</h4>
+                  <button
+                    type="button"
+                    onClick={handleResetNoiseRules}
+                    className="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
+                  >
+                    恢复默认
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mb-4">
+                  当 AI 分析不可用或失败时，使用以下关键词进行本地兜底判断。每行一个关键词，逗号也可分隔。
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {([
+                    { key: "peer", label: "同行 / 服务商" },
+                    { key: "vendor", label: "广告 / 推销" },
+                    { key: "scam", label: "诈骗 / 黑灰产" },
+                    { key: "emotional", label: "纯情绪 / 表情" },
+                    { key: "offtopic", label: "无关闲聊" },
+                  ] as { key: keyof NoiseRules; label: string }[]).map(({ key, label }) => (
+                    <div key={key}>
+                      <label className="block text-xs font-medium text-gray-500 mb-1.5">{label}</label>
+                      <Textarea
+                        value={noiseRules[key].join("\n")}
+                        onChange={(e) => handleNoiseRulesChange(key, e.target.value)}
+                        placeholder="每行一个关键词"
+                        rows={4}
+                        className="rounded-2xl bg-white border-0 px-4 py-3 text-sm focus:ring-2 focus:ring-gray-200 resize-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex items-center gap-3">
+                  <Button
+                    onClick={handleSaveNoiseRules}
+                    disabled={noiseRulesSubmitting}
+                    className="rounded-full px-6 py-3 h-auto text-sm"
+                  >
+                    {noiseRulesSubmitting ? "保存中..." : "保存噪音规则"}
+                  </Button>
                 </div>
               </div>
 

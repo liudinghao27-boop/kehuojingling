@@ -15,6 +15,7 @@ model User {
   aiApiKey      String?   // 用户自定义 DeepSeek/OpenAI API Key
   industryContext String? @db.Text // 业务场景描述，用于 AI 意向分析
   intentScoreThreshold Int @default(4) // 高意向阈值，1-5
+  noiseRules    Json?     // 用户自定义噪音规则
   plan          Plan      @default(FREE)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

@@ -1,4 +1,5 @@
 import "next-auth";
+import type { NoiseRules } from "@/lib/ai/noise";
 
 declare module "next-auth" {
   interface Session {
@@ -11,6 +12,7 @@ declare module "next-auth" {
       platformCredentials: string[];
       industryContext: string | null;
       intentScoreThreshold: number;
+      noiseRules?: NoiseRules;
     };
   }
 
@@ -23,6 +25,7 @@ declare module "next-auth" {
     platformCredentials?: string[];
     industryContext?: string | null;
     intentScoreThreshold?: number;
+    noiseRules?: NoiseRules;
   }
 }
 
@@ -36,5 +39,6 @@ declare module "next-auth/jwt" {
     platformCredentials?: string[];
     industryContext?: string | null;
     intentScoreThreshold?: number;
+    noiseRules?: NoiseRules;
   }
 }
