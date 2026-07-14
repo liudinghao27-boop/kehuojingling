@@ -44,11 +44,12 @@
 # 启动本地数据库和 Redis
 cd /e/ai/YJ-HUOKE && docker compose up -d
 
-# 终端 1：启动抓取服务
-cd /e/ai/Douyin_TikTok_Download_API && .venv/Scripts/python start.py
+# 一键启动 Next.js + 抓取服务
+cd /e/ai/YJ-HUOKE && npm run dev:all
 
-# 终端 2：启动 Next.js
-cd /e/ai/YJ-HUOKE && npm run dev:clean
+# 如需单独启动
+cd /e/ai/YJ-HUOKE && npm run dev:clean       # 仅 Next.js
+cd /e/ai/YJ-HUOKE && npm run dev:scraper     # 仅抓取服务
 ```
 
 ## 已知问题 / 后续
