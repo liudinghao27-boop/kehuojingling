@@ -69,3 +69,14 @@ cd /e/ai/YJ-HUOKE && npm run dev:scraper     # 仅抓取服务
 - 抖音自动回复/私信依赖真实 Cookie 和 Playwright，生产需单独维护
 - 抓取服务需独立部署，生产修改 `SCRAPER_API_URL`
 - 监控词库当前仅保存，尚未与视频/评论监控模块打通，可作为下一阶段桥接点
+
+## 下次继续记录
+- **当前分支**：`main`
+- **最近两次提交**：
+  1. `535726d feat: AI 获客助手热词评分与监控桥接`
+  2. `95e7c50 test: add core API test coverage`
+- **已启用测试框架**：Vitest + `kehuojingling_test` 测试库
+- **推荐继续方向**：
+  1. 打通监控词库 ↔ 视频/评论监控模块（在 Video/Comment 相关页面读取 `KeywordMonitor`）
+  2. 两端口整合（Next.js 与抓取服务合并或统一启动脚本）
+  3. 接入真实指数 API（百度指数/抖音热点宝等）为热词评分提供数据支撑
