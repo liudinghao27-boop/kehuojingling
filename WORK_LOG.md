@@ -2,28 +2,28 @@
 
 > 仅保留最近一次工作记录，每次保存自动覆盖。
 
-## 最后状态：2026-07-14
+## 最后状态：2026-07-15
 
 ## 本次完成
 
-### 1. 数据迁移到本地
-- 修复 Docker Desktop 镜像拉取失败：配置 DaoCloud 镜像源 `docker.m.daocloud.io`
-- 启动本地 PostgreSQL + Redis：`docker compose up -d`
-- 从 Render PostgreSQL 导出完整数据：`pg_dump`（数据库大小约 8.6 MB）
-- 导入到本地 `kehuojingling` 数据库：用户、视频、评论、回复、私信、模板、活动全部保留
-- 更新 `.env`：
-  - `DATABASE_URL` 指向本地 `localhost:5432`
-  - 新增 `REDIS_URL=redis://localhost:6379`
-  - 新增 `SCRAPER_API_URL=http://localhost:8000`
-  - `NEXTAUTH_URL` 统一为 `http://localhost:3000`
-- 数据库备份保存到 `backups/render_dump.sql`（已加入 `.gitignore`）
+### 1. 设置页「平台账号配置」改造收尾
+- 修复书签小工具 CORS：支持抖音、快手、视频号三个域名
+  - `src/app/api/user/platform-credentials/[platform]/bookmarklet/route.ts`
+  - 非白名单域名的请求返回 403
+- 清理 QR 扫码登录死代码：
+  - 删除 `src/lib/qr-login/` 整个目录
+  - 删除 `src/app/api/user/platform-credentials/[platform]/qr-login/route.ts`
 
-### 2. 验证
-- `npx prisma generate` 成功
+### 2. Prisma 迁移规范化
+- 生成 baseline migration：`prisma/migrations/0_init/migration.sql`
+- 创建 `prisma/migrations/migration_lock.toml`
+- 当前数据库已标记为已应用 baseline，不影响现有数据
+- 后续数据库变更可安全使用 `prisma migrate dev` / `prisma migrate deploy`
+
+### 3. 验证
 - `npm run lint` 通过
-- `npx tsc --noEmit` 通过
+- `npx tsc --noEmit` 通过（清理 `.next` 缓存后）
 - `npm run build` 通过
-- 本地数据库查询验证：用户/视频/评论数据与 Render 一致
 
 ## 当前运行状态
 - 获客精灵：`http://localhost:3000` ✅
@@ -35,7 +35,7 @@
 ## 开发命令
 
 ```bash
-# 启动本地数据库和 Redis（已启动）
+# 启动本地数据库和 Redis
 cd /e/ai/YJ-HUOKE && docker compose up -d
 
 # 终端 1：启动抓取服务
