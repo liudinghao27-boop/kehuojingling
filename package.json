@@ -20,7 +20,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "dev:clean": "node scripts/dev-clean.js"
+    "dev:clean": "node scripts/dev-clean.js",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

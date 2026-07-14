@@ -6,31 +6,38 @@
 
 ## 本次完成
 
-### 1. 代码质量修复
-- 修复全部 82 个 ESLint 问题（54 errors, 28 warnings）
-- 统一 `unknown` 错误处理：新增 `src/lib/errors.ts`
-- 替换所有 `catch (error: any)`，消除显式 `any`
-- 修复 React Hooks 问题：effect 内 setState、函数声明顺序、依赖项缺失
-- `npm run lint`、`npx tsc --noEmit`、`npm run build` 全部通过
+### 1. 数据迁移到本地
+- 修复 Docker Desktop 镜像拉取失败：配置 DaoCloud 镜像源 `docker.m.daocloud.io`
+- 启动本地 PostgreSQL + Redis：`docker compose up -d`
+- 从 Render PostgreSQL 导出完整数据：`pg_dump`（数据库大小约 8.6 MB）
+- 导入到本地 `kehuojingling` 数据库：用户、视频、评论、回复、私信、模板、活动全部保留
+- 更新 `.env`：
+  - `DATABASE_URL` 指向本地 `localhost:5432`
+  - 新增 `REDIS_URL=redis://localhost:6379`
+  - 新增 `SCRAPER_API_URL=http://localhost:8000`
+  - `NEXTAUTH_URL` 统一为 `http://localhost:3000`
+- 数据库备份保存到 `backups/render_dump.sql`（已加入 `.gitignore`）
 
-### 2. UI 展示噪音类型
-- 数据库 `Comment` 模型新增 `isNoise`、`noiseType`、`noiseReason` 字段
-- 抓取逻辑改为保存所有评论（含噪音），不再直接丢弃
-- 评论列表 API 新增 `noise` 参数：`false`（默认隐藏噪音）/`true`（仅噪音）/`all`（全部）
-- 评论列表 UI 增加噪音过滤按钮：隐藏噪音 / 仅噪音 / 含噪音
-- 评论卡片显示噪音类型标签（同行 / 广告 / 诈骗 / 无关 / 纯情绪）和过滤原因
-- 噪音评论禁用回复/私信/批量选择，视觉上以灰色+删除线区分
-- 导出 CSV 增加「噪音类型」和「噪音原因」两列
+### 2. 验证
+- `npx prisma generate` 成功
+- `npm run lint` 通过
+- `npx tsc --noEmit` 通过
+- `npm run build` 通过
+- 本地数据库查询验证：用户/视频/评论数据与 Render 一致
 
 ## 当前运行状态
 - 获客精灵：`http://localhost:3000` ✅
 - 抓取服务：`http://localhost:8000` ✅
-- 数据库：Render PostgreSQL 正常 ✅
+- 本地数据库：`localhost:5432` ✅
+- 本地 Redis：`localhost:6379` ✅
 - DeepSeek Key：已加密存储 ✅
 
 ## 开发命令
 
 ```bash
+# 启动本地数据库和 Redis（已启动）
+cd /e/ai/YJ-HUOKE && docker compose up -d
+
 # 终端 1：启动抓取服务
 cd /e/ai/Douyin_TikTok_Download_API && .venv/Scripts/python start.py
 

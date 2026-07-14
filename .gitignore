@@ -35,6 +35,9 @@ server.log
 .env*
 ENV_CONFIG.md
 
+# database backups
+/backups
+
 # vercel
 .vercel
 
