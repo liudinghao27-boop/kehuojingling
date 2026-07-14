@@ -3,11 +3,12 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/db';
 import { z } from 'zod';
-import { parseVideoUrl, scrapeComments } from '@/lib/scraper/douyin';
-import { analyzeIntentWithAI } from '@/lib/ai/intent';
+import { parseVideoUrl, scrapeCommentsReal } from '@/lib/scraper/douyin';
+import { analyzeComments } from '@/lib/ai/noise';
+import { tryDecryptAiApiKey } from '@/lib/encryption';
 
 const scrapeSchema = z.object({
-  url: z.string().url('请输入有效的视频链接'),
+  url: z.string().min(1, '请输入视频链接'),
   platform: z.enum(['DOUYIN', 'KUAISHOU', 'SHIPINHAO']).default('DOUYIN'),
 });
 
@@ -30,6 +31,13 @@ export async function POST(req: NextRequest) {
 
     const { url, platform } = result.data;
 
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { aiApiKey: true, industryContext: true },
+    });
+
+    const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
+
     // 解析视频链接
     const parsedVideo = parseVideoUrl(url);
     if (!parsedVideo) {
@@ -39,13 +47,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 抓取评论（接入开源爬虫）
-    const scrapedComments = await scrapeComments(parsedVideo, { maxComments: 50 });
+    // 抓取评论（接入 Evil0ctal 开源爬虫）
+    const scrapedComments = await scrapeCommentsReal(parsedVideo);
 
     // 创建视频记录
     const video = await prisma.video.create({
       data: {
-        url,
+        url: parsedVideo.originalUrl,
         platform,
         title: `视频 ${parsedVideo.videoId}`,
         author: parsedVideo.platform,
@@ -54,31 +62,38 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // AI 分析评论意向并保存
+    // AI 分析评论意向并过滤白噪音
+    const contents = scrapedComments.map(c => c.content);
+    const analyses = await analyzeComments(contents, user?.industryContext || undefined, aiApiKey);
+
     const savedComments = [];
-    for (const comment of scrapedComments) {
-      // 调用 AI 意向识别
-      const intent = await analyzeIntentWithAI(comment.content);
-      
+    for (let i = 0; i < scrapedComments.length; i++) {
+      const comment = scrapedComments[i];
+      const analysis = analyses[i];
+
+      if (analysis.isNoise || analysis.score < 3) {
+        continue;
+      }
+
       const saved = await prisma.comment.create({
         data: {
           content: comment.content,
           authorName: comment.authorName,
           authorAvatar: comment.authorAvatar,
           videoId: video.id,
-          intentScore: intent.score,
-          intentKeywords: intent.keywords,
-          status: intent.score >= 4 ? 'ANALYZED' : 'NEW',
+          intentScore: analysis.score,
+          intentKeywords: analysis.keywords,
+          status: analysis.score >= 4 ? 'ANALYZED' : 'NEW',
         },
       });
-      
+
       savedComments.push({
         id: saved.id,
         content: saved.content,
         authorName: saved.authorName,
-        intentScore: intent.score,
-        keywords: intent.keywords,
-        category: intent.category,
+        intentScore: saved.intentScore,
+        keywords: saved.intentKeywords,
+        category: analysis.category,
       });
     }
 
