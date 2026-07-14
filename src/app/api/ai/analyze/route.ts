@@ -23,10 +23,11 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { aiApiKey: true, industryContext: true },
+      select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true },
     });
 
     const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
+    const threshold = user?.intentScoreThreshold ?? 4;
 
     // AI 分析意向
     const intent = await analyzeIntentWithAI(
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
         data: {
           intentScore: intent.score,
           intentKeywords: intent.keywords,
-          status: intent.score >= 4 ? 'ANALYZED' : 'NEW',
+          status: intent.score >= threshold ? 'ANALYZED' : 'NEW',
         },
       });
     }
@@ -86,10 +87,11 @@ export async function GET(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { aiApiKey: true, industryContext: true },
+      select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true },
     });
 
     const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
+    const threshold = user?.intentScoreThreshold ?? 4;
 
     // 获取未分析的评论
     const comments = await prisma.comment.findMany({
@@ -117,7 +119,7 @@ export async function GET(req: NextRequest) {
         data: {
           intentScore: analysis.score,
           intentKeywords: analysis.keywords,
-          status: analysis.score >= 4 ? 'ANALYZED' : 'NEW',
+          status: analysis.score >= threshold ? 'ANALYZED' : 'NEW',
         },
       });
 

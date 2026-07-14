@@ -13,12 +13,18 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const videoId = searchParams.get('videoId');
-    const intent = searchParams.get('intent'); // 'high' for intentScore >= 4
+    const intent = searchParams.get('intent'); // 'high' for intentScore >= threshold
     const status = searchParams.get('status');
     const noise = searchParams.get('noise'); // 'true' | 'false' | 'all', default 'false'
     const q = searchParams.get('q')?.trim();
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '10', 10)));
+
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { intentScoreThreshold: true },
+    });
+    const threshold = user?.intentScoreThreshold ?? 4;
 
     const where: Prisma.CommentWhereInput = {
       video: { userId: session.user.id },
@@ -37,7 +43,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (intent === 'high') {
-      where.intentScore = { gte: 4 };
+      where.intentScore = { gte: threshold };
     }
 
     if (noise === 'true') {

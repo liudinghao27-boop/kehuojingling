@@ -9,6 +9,7 @@ const profileSchema = z.object({
   email: z.string().email('邮箱格式不正确').max(100, '邮箱太长').optional(),
   phone: z.union([z.string().length(0), z.string().regex(/^1[3-9]\d{9}$/, '手机号格式不正确')]).optional(),
   industryContext: z.string().max(2000, '业务场景描述太长').optional(),
+  intentScoreThreshold: z.number().int().min(1, '阈值最小为 1').max(5, '阈值最大为 5').optional(),
 });
 
 export async function PATCH(req: NextRequest) {
@@ -28,15 +29,16 @@ export async function PATCH(req: NextRequest) {
     }
 
     const data = result.data;
-    if (!data.name && !data.email && data.phone === undefined && data.industryContext === undefined) {
+    if (!data.name && !data.email && data.phone === undefined && data.industryContext === undefined && data.intentScoreThreshold === undefined) {
       return NextResponse.json({ error: '没有可更新的内容' }, { status: 400 });
     }
 
-    const updateData: { name?: string; email?: string; phone?: string | null; industryContext?: string | null } = {};
+    const updateData: { name?: string; email?: string; phone?: string | null; industryContext?: string | null; intentScoreThreshold?: number } = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.email !== undefined) updateData.email = data.email;
     if (data.phone !== undefined) updateData.phone = data.phone || null;
     if (data.industryContext !== undefined) updateData.industryContext = data.industryContext || null;
+    if (data.intentScoreThreshold !== undefined) updateData.intentScoreThreshold = data.intentScoreThreshold;
 
     if (updateData.email) {
       const existing = await prisma.user.findUnique({
@@ -57,6 +59,7 @@ export async function PATCH(req: NextRequest) {
         phone: true,
         plan: true,
         industryContext: true,
+        intentScoreThreshold: true,
       },
     });
 

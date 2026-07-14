@@ -6,23 +6,22 @@
 
 ## 本次完成
 
-### 1. 设置页「平台账号配置」改造收尾
-- 修复书签小工具 CORS：支持抖音、快手、视频号三个域名
-  - `src/app/api/user/platform-credentials/[platform]/bookmarklet/route.ts`
-  - 非白名单域名的请求返回 403
-- 清理 QR 扫码登录死代码：
-  - 删除 `src/lib/qr-login/` 整个目录
-  - 删除 `src/app/api/user/platform-credentials/[platform]/qr-login/route.ts`
+### 1. 意向分阈值可配置
+- `User` 表新增 `intentScoreThreshold` 字段（默认 4，范围 1-5）
+- 生成 migration：`20260714181728_add_intent_score_threshold`
+- 扩展 NextAuth session/jwt，设置页可直接读取当前阈值
+- 扩展 `/api/user/profile` API，支持单独更新阈值
+- 设置页「AI 模型配置」新增 1-5 分段阈值选择器，点击即保存
+- 后端逻辑全面使用用户阈值替代硬编码 4：
+  - 单条/批量意向分析：`score >= threshold ? 'ANALYZED' : 'NEW'`
+  - 抓取评论过滤：丢弃 `score < threshold` 的评论
+  - 评论列表「高意向」筛选：`intentScore >= threshold`
+  - 视频高意向统计按阈值计算
 
-### 2. Prisma 迁移规范化
-- 生成 baseline migration：`prisma/migrations/0_init/migration.sql`
-- 创建 `prisma/migrations/migration_lock.toml`
-- 当前数据库已标记为已应用 baseline，不影响现有数据
-- 后续数据库变更可安全使用 `prisma migrate dev` / `prisma migrate deploy`
-
-### 3. 验证
+### 2. 验证
+- `npx prisma generate` 成功
 - `npm run lint` 通过
-- `npx tsc --noEmit` 通过（清理 `.next` 缓存后）
+- `npx tsc --noEmit` 通过
 - `npm run build` 通过
 
 ## 当前运行状态
@@ -48,4 +47,4 @@ cd /e/ai/YJ-HUOKE && npm run dev:clean
 ## 已知问题 / 后续
 - 抖音自动回复/私信依赖真实 Cookie 和 Playwright，生产需单独维护
 - 抓取服务需独立部署，生产修改 `SCRAPER_API_URL`
-- 建议后续：阈值可配置（用户自行调整最低意向分）、两端口整合、本地噪音规则可配置
+- 建议后续：本地噪音规则可配置、两端口整合、核心 API 测试覆盖

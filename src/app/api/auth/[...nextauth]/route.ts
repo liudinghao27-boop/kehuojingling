@@ -38,6 +38,7 @@ export const authOptions = {
           phone: user.phone,
           plan: user.plan,
           industryContext: user.industryContext,
+          intentScoreThreshold: user.intentScoreThreshold,
         };
       },
     }),
@@ -51,6 +52,7 @@ export const authOptions = {
         token.plan = user.plan;
         token.phone = user.phone;
         token.industryContext = user.industryContext;
+        token.intentScoreThreshold = user.intentScoreThreshold;
       }
 
       if (trigger === 'update' && session?.user) {
@@ -59,6 +61,7 @@ export const authOptions = {
         if (session.user.phone !== undefined) token.phone = session.user.phone;
         if (session.user.plan !== undefined) token.plan = session.user.plan;
         if (session.user.industryContext !== undefined) token.industryContext = session.user.industryContext;
+        if (session.user.intentScoreThreshold !== undefined) token.intentScoreThreshold = session.user.intentScoreThreshold;
         if (session.user.platformCredentials !== undefined) {
           token.platformCredentials = session.user.platformCredentials;
         }
@@ -83,6 +86,7 @@ export const authOptions = {
         session.user.plan = token.plan as string;
         session.user.phone = token.phone as string | null;
         session.user.industryContext = token.industryContext as string | null;
+        session.user.intentScoreThreshold = (token.intentScoreThreshold as number) ?? 4;
         session.user.platformCredentials = (token.platformCredentials as string[]) || [];
       }
       return session;

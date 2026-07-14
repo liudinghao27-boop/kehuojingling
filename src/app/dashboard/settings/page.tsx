@@ -54,6 +54,7 @@ export default function SettingsPage() {
     email: "",
     phone: "",
     industryContext: "",
+    intentScoreThreshold: 4,
   });
   const [profileEditing, setProfileEditing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -110,6 +111,7 @@ export default function SettingsPage() {
         email: session.user.email || "",
         phone: session.user.phone || "",
         industryContext: session.user.industryContext || "",
+        intentScoreThreshold: session.user.intentScoreThreshold ?? 4,
       });
     }
   }, [session?.user]);
@@ -202,6 +204,7 @@ export default function SettingsPage() {
           email: data.user.email,
           phone: data.user.phone,
           industryContext: data.user.industryContext,
+          intentScoreThreshold: data.user.intentScoreThreshold,
         },
       });
 
@@ -209,6 +212,34 @@ export default function SettingsPage() {
       setProfileEditing(false);
     } catch (error) {
       addToast(getErrorMessage(error) || "更新个人信息失败", "error");
+    } finally {
+      setProfileSubmitting(false);
+    }
+  };
+
+  const handleSaveThreshold = async (score: number) => {
+    if (score === profileForm.intentScoreThreshold) return;
+
+    setProfileSubmitting(true);
+    try {
+      const res = await fetch("/api/user/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intentScoreThreshold: score }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "保存失败");
+      }
+
+      setProfileForm((prev) => ({ ...prev, intentScoreThreshold: score }));
+      await update({
+        user: { intentScoreThreshold: score },
+      });
+
+      addToast(`意向分析阈值已设为 ${score} 分`, "success");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "保存阈值失败", "error");
     } finally {
       setProfileSubmitting(false);
     }
@@ -542,6 +573,7 @@ export default function SettingsPage() {
                           email: session?.user?.email || "",
                           phone: session?.user?.phone || "",
                           industryContext: session?.user?.industryContext || "",
+                          intentScoreThreshold: session?.user?.intentScoreThreshold ?? 4,
                         });
                       }}
                       disabled={profileSubmitting}
@@ -714,7 +746,36 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               </div>
-              <p className="mt-4 text-xs text-gray-400">
+
+              <div className="mt-6 pt-6 border-t border-gray-100">
+                <h4 className="text-sm font-medium text-gray-900 mb-3">意向分析阈值</h4>
+                <p className="text-xs text-gray-400 mb-4">
+                  评论意向分 ≥ {profileForm.intentScoreThreshold} 分时会被标记为&quot;高意向&quot;，并出现在&quot;高意向&quot;筛选中。
+                </p>
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map((score) => (
+                    <button
+                      key={score}
+                      type="button"
+                      onClick={() => handleSaveThreshold(score)}
+                      disabled={profileSubmitting}
+                      className={`w-10 h-10 rounded-2xl text-sm font-medium transition-colors ${
+                        profileForm.intentScoreThreshold === score
+                          ? "bg-gray-900 text-white"
+                          : "bg-white text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                      {score}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-400 mt-2 max-w-[232px]">
+                  <span>宽松</span>
+                  <span>严格</span>
+                </div>
+              </div>
+
+              <p className="mt-6 text-xs text-gray-400">
                 你也可以在服务端环境变量中配置全局 OPENAI_API_KEY，作为未配置个人 Key 用户的兜底（当前未配置则不生效）。
               </p>
           </CollapsibleCard>

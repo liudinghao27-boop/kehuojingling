@@ -33,10 +33,11 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { aiApiKey: true, industryContext: true },
+      select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true },
     });
 
     const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
+    const threshold = user?.intentScoreThreshold ?? 4;
 
     // 解析视频链接
     const parsedVideo = parseVideoUrl(url);
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
       const comment = scrapedComments[i];
       const analysis = analyses[i];
 
-      if (analysis.isNoise || analysis.score < 3) {
+      if (analysis.isNoise || analysis.score < threshold) {
         continue;
       }
 
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
           videoId: video.id,
           intentScore: analysis.score,
           intentKeywords: analysis.keywords,
-          status: analysis.score >= 4 ? 'ANALYZED' : 'NEW',
+          status: analysis.score >= threshold ? 'ANALYZED' : 'NEW',
         },
       });
 
@@ -104,7 +105,7 @@ export async function POST(req: NextRequest) {
         url: video.url,
         platform: video.platform,
         commentsCount: savedComments.length,
-        highIntentCount: savedComments.filter(c => c.intentScore >= 4).length,
+        highIntentCount: savedComments.filter(c => c.intentScore >= threshold).length,
       },
       comments: savedComments,
     });

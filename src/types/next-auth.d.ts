@@ -10,6 +10,7 @@ declare module "next-auth" {
       plan: string;
       platformCredentials: string[];
       industryContext: string | null;
+      intentScoreThreshold: number;
     };
   }
 
@@ -21,6 +22,7 @@ declare module "next-auth" {
     plan: string;
     platformCredentials?: string[];
     industryContext?: string | null;
+    intentScoreThreshold?: number;
   }
 }
 
@@ -33,5 +35,6 @@ declare module "next-auth/jwt" {
     plan?: string;
     platformCredentials?: string[];
     industryContext?: string | null;
+    intentScoreThreshold?: number;
   }
 }
