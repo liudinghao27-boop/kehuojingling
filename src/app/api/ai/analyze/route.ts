@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/db';
 import { analyzeIntentWithAI, generateReplySuggestion } from '@/lib/ai/intent';
+import { analyzeComments } from '@/lib/ai/noise';
+import { tryDecryptAiApiKey } from '@/lib/encryption';
 
 // POST: 分析单条评论意向
 export async function POST(req: NextRequest) {
@@ -19,8 +21,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '缺少评论内容' }, { status: 400 });
     }
 
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { aiApiKey: true, industryContext: true },
+    });
+
+    const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
+
     // AI 分析意向
-    const intent = await analyzeIntentWithAI(content);
+    const intent = await analyzeIntentWithAI(
+      content,
+      user?.industryContext || undefined,
+      aiApiKey
+    );
 
     // 如果有 commentId，更新数据库
     if (commentId) {
@@ -35,7 +48,12 @@ export async function POST(req: NextRequest) {
     }
 
     // 生成回复建议
-    const replySuggestion = await generateReplySuggestion(content, intent);
+    const replySuggestion = await generateReplySuggestion(
+      content,
+      intent,
+      undefined,
+      aiApiKey
+    );
 
     return NextResponse.json({
       success: true,
@@ -66,32 +84,47 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: '缺少视频ID' }, { status: 400 });
     }
 
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { aiApiKey: true, industryContext: true },
+    });
+
+    const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
+
     // 获取未分析的评论
     const comments = await prisma.comment.findMany({
-      where: { 
+      where: {
         videoId,
         status: 'NEW',
       },
       take: 20, // 每次最多分析20条
     });
 
+    const contents = comments.map(c => c.content);
+    const analyses = await analyzeComments(
+      contents,
+      user?.industryContext || undefined,
+      aiApiKey
+    );
+
     const results = [];
-    for (const comment of comments) {
-      const intent = await analyzeIntentWithAI(comment.content);
-      
+    for (let i = 0; i < comments.length; i++) {
+      const comment = comments[i];
+      const analysis = analyses[i];
+
       await prisma.comment.update({
         where: { id: comment.id },
         data: {
-          intentScore: intent.score,
-          intentKeywords: intent.keywords,
-          status: intent.score >= 4 ? 'ANALYZED' : 'NEW',
+          intentScore: analysis.score,
+          intentKeywords: analysis.keywords,
+          status: analysis.score >= 4 ? 'ANALYZED' : 'NEW',
         },
       });
 
       results.push({
         id: comment.id,
         content: comment.content,
-        analysis: intent,
+        analysis,
       });
     }
 
