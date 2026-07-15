@@ -122,6 +122,7 @@ export async function POST(req: NextRequest) {
         videoUrl: comment.video.url,
         commentId: comment.id,
         authorName: comment.authorName,
+        commentContent: comment.content,
         content: replyContent,
       });
 

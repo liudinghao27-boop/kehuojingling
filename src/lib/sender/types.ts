@@ -14,6 +14,7 @@ export interface SendReplyParams {
   videoUrl: string;
   commentId: string;
   authorName: string;
+  commentContent: string;
   content: string;
   credentials?: PlatformCredentials;
 }
@@ -24,6 +25,7 @@ export interface SendDmParams {
   videoUrl: string;
   commentId: string;
   authorName: string;
+  commentContent: string;
   content: string;
   credentials?: PlatformCredentials;
 }

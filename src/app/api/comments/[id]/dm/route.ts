@@ -98,6 +98,7 @@ export async function POST(
       videoUrl: comment.video.url,
       commentId,
       authorName: comment.authorName,
+      commentContent: comment.content,
       content: dmContent,
     });
 
