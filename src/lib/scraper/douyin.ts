@@ -6,6 +6,22 @@
  * 文档: https://github.com/Evil0ctal/Douyin_TikTok_Download_API
  */
 
+export function getScraperApiUrl(): string {
+  const configured = process.env.SCRAPER_API_URL?.trim();
+  if (!configured || configured === '/api/scraper') {
+    // 走 Next.js 代理路由，开发默认 localhost:3000
+    return 'http://localhost:3000/api/scraper';
+  }
+  return configured.replace(/\/$/, '');
+}
+
+function buildScraperUrl(endpoint: string, path: string, search: string): string {
+  const base = endpoint.replace(/\/$/, '');
+  const isProxy = base.endsWith('/api/scraper');
+  const prefix = isProxy ? '' : '/api';
+  return `${base}${prefix}${path}${search}`;
+}
+
 interface ParsedVideo {
   platform: 'DOUYIN' | 'KUAISHOU' | 'SHIPINHAO';
   videoId: string;
@@ -206,13 +222,17 @@ export async function scrapeComments(
 // 生产环境真实API调用（ Evil0ctal/Douyin_TikTok_Download_API ）
 export async function scrapeCommentsReal(
   parsedVideo: ParsedVideo,
-  apiEndpoint: string = process.env.SCRAPER_API_URL || 'http://localhost:8000'
+  apiEndpoint: string = getScraperApiUrl()
 ): Promise<ScrapedComment[]> {
   const endpoint = apiEndpoint.replace(/\/$/, '');
 
   // 1. 先解析出平台内部视频ID
   const hybridRes = await fetch(
-    `${endpoint}/api/hybrid/video_data?url=${encodeURIComponent(parsedVideo.originalUrl)}`,
+    buildScraperUrl(
+      endpoint,
+      '/hybrid/video_data',
+      `?url=${encodeURIComponent(parsedVideo.originalUrl)}`
+    ),
     { method: 'GET' }
   );
 
@@ -230,7 +250,11 @@ export async function scrapeCommentsReal(
   // 2. 拉取评论（抖音）
   if (parsedVideo.platform === 'DOUYIN') {
     const commentsRes = await fetch(
-      `${endpoint}/api/douyin/web/fetch_video_comments?aweme_id=${awemeId}&cursor=0&count=50`,
+      buildScraperUrl(
+        endpoint,
+        '/douyin/web/fetch_video_comments',
+        `?aweme_id=${awemeId}&cursor=0&count=50`
+      ),
       { method: 'GET' }
     );
 

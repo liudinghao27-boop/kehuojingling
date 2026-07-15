@@ -68,18 +68,38 @@ function main() {
   child.on('exit', (code) => {
     if (code !== 0 && code !== null) {
       error(`抓取服务退出，退出码 ${code}`);
+      error(`可查看日志：${path.join(SCRAPER_PATH, 'logs')}`);
     }
     process.exit(code ?? 0);
   });
 
-  process.on('SIGINT', () => {
-    log('收到退出信号，正在停止抓取服务...');
-    child.kill('SIGINT');
-  });
+  function shutdown(signal) {
+    log(`收到 ${signal}，正在停止抓取服务...`);
+    if (IS_WINDOWS) {
+      try {
+        // Windows 下子进程通常收不到 POSIX 信号，使用 taskkill 强制树级终止
+        const { spawn } = require('child_process');
+        spawn('taskkill', ['/pid', child.pid, '/T', '/F'], { stdio: 'ignore' });
+      } catch {
+        child.kill('SIGTERM');
+      }
+    } else {
+      child.kill(signal);
+    }
+  }
 
-  process.on('SIGTERM', () => {
-    child.kill('SIGTERM');
-  });
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  // Windows 下按 Ctrl+C 时 process.on('SIGINT') 可能不触发，监听 readline 兜底
+  if (IS_WINDOWS) {
+    const readline = require('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.on('SIGINT', () => shutdown('SIGINT'));
+  }
 }
 
 main();
