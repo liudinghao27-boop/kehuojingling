@@ -2,6 +2,12 @@ import { SenderProvider } from './types';
 import { providers } from './providers';
 
 export function getActiveProvider(platform: string): SenderProvider {
+  // 可通过 SENDER_PROVIDER=mock 强制使用模拟发送器，用于本地流程测试
+  const forced = process.env.SENDER_PROVIDER?.toLowerCase();
+  if (forced === 'mock') {
+    return providers.mock;
+  }
+
   // Step 4：抖音接入真实 Playwright provider，其他平台继续走 mock
   if (platform === 'DOUYIN') {
     return providers.douyin;

@@ -58,10 +58,14 @@ export async function sendReplyToPlatform(
 
   const provider = getActiveProvider(platform);
   console.log('[Sender:reply]', params);
-  return provider.sendReply({
+  const result = await provider.sendReply({
     ...params,
     credentials: credentialResult.credentials,
   });
+  if (!result.success) {
+    console.error('[Sender:reply] failed:', result.error);
+  }
+  return result;
 }
 
 export async function sendDmToPlatform(
@@ -80,8 +84,12 @@ export async function sendDmToPlatform(
 
   const provider = getActiveProvider(platform);
   console.log('[Sender:dm]', params);
-  return provider.sendDm({
+  const result = await provider.sendDm({
     ...params,
     credentials: credentialResult.credentials,
   });
+  if (!result.success) {
+    console.error('[Sender:dm] failed:', result.error);
+  }
+  return result;
 }

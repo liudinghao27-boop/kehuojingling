@@ -117,11 +117,22 @@ async function withBrowser<T>(
       if (cookies.length === 0) {
         throw new Error('Cookie 格式无效');
       }
+      console.log(`[DouyinSender] 加载 ${cookies.length} 个 Cookie`);
       await context.addCookies(cookies);
     }
 
     const page = await context.newPage();
     page.setDefaultTimeout(DEFAULT_TIMEOUT);
+
+    // 收集页面控制台日志，便于排查抖音反爬/错误
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') {
+        console.log(`[DouyinSender:page:error] ${msg.text()}`);
+      }
+    });
+    page.on('pageerror', (err) => {
+      console.log(`[DouyinSender:page:error] ${err.message}`);
+    });
 
     return await operation(page);
   } finally {
@@ -160,13 +171,21 @@ async function sendReplyOperation(
 ): Promise<SendResult> {
   const { videoUrl, content, authorName } = params;
 
+  console.log(`[DouyinSender:reply] 打开视频页: ${videoUrl}`);
   await page.goto(videoUrl, { waitUntil: 'domcontentloaded' });
   await randomDelay(1000, 3000);
 
+  const currentUrl = page.url();
+  console.log(`[DouyinSender:reply] 当前页面: ${currentUrl}`);
+  if (currentUrl.includes('login') || currentUrl.includes('verify')) {
+    return { success: false, error: 'Cookie 失效或需要登录验证' };
+  }
+
   const container = await findCommentContainer(page, authorName);
   if (!container) {
-    return { success: false, error: '未找到目标评论' };
+    return { success: false, error: `未找到作者「${authorName}」的评论` };
   }
+  console.log(`[DouyinSender:reply] 找到评论容器`);
 
   const replyBtn = container.locator('text=回复').first();
   const replyVisible = await replyBtn.isVisible().catch(() => false);
@@ -174,6 +193,7 @@ async function sendReplyOperation(
     return { success: false, error: '未找到回复按钮' };
   }
   await replyBtn.click();
+  console.log(`[DouyinSender:reply] 点击回复按钮`);
   await randomDelay(1000, 2000);
 
   // 优先在评论容器内定位输入框，若不存在则在页面级定位
@@ -187,6 +207,7 @@ async function sendReplyOperation(
     return { success: false, error: '未找到回复输入框' };
   }
   await input.fill(content);
+  console.log(`[DouyinSender:reply] 填写回复内容`);
   await randomDelay(1000, 2000);
 
   const sendBtn = container.locator('text=发送').first().or(page.locator('text=发送').last());
@@ -195,6 +216,7 @@ async function sendReplyOperation(
     return { success: false, error: '未找到发送按钮' };
   }
   await sendBtn.click();
+  console.log(`[DouyinSender:reply] 点击发送按钮`);
 
   // 等待发送成功标识（新回复出现或 Toast）
   await page.waitForTimeout(2000);
@@ -208,12 +230,19 @@ async function sendDmOperation(
 ): Promise<SendResult> {
   const { videoUrl, authorName, content } = params;
 
+  console.log(`[DouyinSender:dm] 打开视频页: ${videoUrl}`);
   await page.goto(videoUrl, { waitUntil: 'domcontentloaded' });
   await randomDelay(1000, 3000);
 
+  const currentUrl = page.url();
+  console.log(`[DouyinSender:dm] 当前页面: ${currentUrl}`);
+  if (currentUrl.includes('login') || currentUrl.includes('verify')) {
+    return { success: false, error: 'Cookie 失效或需要登录验证' };
+  }
+
   const container = await findCommentContainer(page, authorName);
   if (!container) {
-    return { success: false, error: '未找到目标评论' };
+    return { success: false, error: `未找到作者「${authorName}」的评论` };
   }
 
   // 点击评论作者昵称/头像进入主页；优先尝试 <a> 标签，再退回到文本元素。
