@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/db';
-import { extractKeywordsWithAI } from '@/lib/ai/keywords';
+import { extractKeywordsWithAI, createDefaultIndexProvider } from '@/lib/ai/keywords';
 import { checkPlanLimit, PlanType } from '@/lib/plans';
 import { tryDecryptAiApiKey } from '@/lib/encryption';
 import { getErrorMessage } from '@/lib/errors';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 
 const schema = z.object({
   industry: z.string().min(2, '请输入行业或产品描述').max(500, '描述过长'),
@@ -40,7 +41,33 @@ export async function POST(req: NextRequest) {
     });
 
     const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
-    const data = await extractKeywordsWithAI(result.data.industry, aiApiKey);
+    const indexProvider = createDefaultIndexProvider();
+    const data = await extractKeywordsWithAI(result.data.industry, aiApiKey, indexProvider);
+
+    const usedRealIndexData = data.scoredKeywords.some(
+      (item) => item.source === 'baidu' || item.source === 'douyin' || item.source === 'mixed'
+    );
+
+    await prisma.aiResearchHistory.create({
+      data: {
+        userId: session.user.id,
+        title: result.data.industry.trim(),
+        industry: result.data.industry.trim(),
+        combinedSearchQueries: data.combinedSearchQueries,
+        coreKeywords: data.coreKeywords,
+        longTailKeywords: data.longTailKeywords,
+        painPoints: data.painPoints,
+        competitorAccounts: data.competitorAccounts,
+        searchCommands: data.searchCommands as unknown as Prisma.InputJsonValue,
+        scoredKeywords: data.scoredKeywords as unknown as Prisma.InputJsonValue,
+        indexData: (data.indexData ?? []) as unknown as Prisma.InputJsonValue,
+        usedRealIndexData,
+        researchHotTopics: [],
+        researchPainPoints: data.painPoints,
+        researchCompetitors: data.competitorAccounts,
+        researchKeywords: data.coreKeywords,
+      },
+    });
 
     return NextResponse.json({ success: true, data });
   } catch (error) {

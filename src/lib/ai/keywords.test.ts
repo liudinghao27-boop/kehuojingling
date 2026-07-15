@@ -1,5 +1,39 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeResult } from './keywords';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { normalizeResult, mockIndexProvider, IndexProvider } from './keywords';
+
+const mockAiResponse = {
+  combinedSearchQueries: ['q1'],
+  coreKeywords: ['k1'],
+  longTailKeywords: ['long1'],
+  painPoints: ['p1'],
+  competitorAccounts: ['c1'],
+  searchCommands: {
+    douyin: ['d1'],
+    xiaohongshu: [],
+    zhihu: [],
+    baidu: [],
+  },
+  scoredKeywords: [
+    { keyword: 'k1', searchVolume: 3, competition: 2, businessIntent: 5, score: 4 },
+    { keyword: 'long1', searchVolume: 4, competition: 3, businessIntent: 4, score: 3 },
+  ],
+};
+
+vi.mock('./client', () => ({
+  createAIClient: vi.fn(() => ({
+    chat: {
+      completions: {
+        create: vi.fn().mockResolvedValue({
+          model: 'deepseek-v4-flash',
+          choices: [{ message: { content: JSON.stringify(mockAiResponse) } }],
+          usage: { total_tokens: 100 },
+        }),
+      },
+    },
+  })),
+  getAIModel: vi.fn(() => 'deepseek-v4-flash'),
+  hasAIKeyConfigured: vi.fn(() => true),
+}));
 
 describe('normalizeResult', () => {
   it('returns default structure for empty input', () => {
@@ -74,5 +108,64 @@ describe('normalizeResult', () => {
     });
     expect(result.scoredKeywords[0].score).toBeGreaterThanOrEqual(1);
     expect(result.scoredKeywords[0].score).toBeLessThanOrEqual(5);
+  });
+});
+
+describe('extractKeywordsWithAI with index provider', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('merges mock index data and sets source/confidence', async () => {
+    const { extractKeywordsWithAI } = await import('./keywords');
+    const result = await extractKeywordsWithAI('测试行业', 'fake-key', mockIndexProvider);
+
+    expect(result.scoredKeywords).toHaveLength(2);
+    for (const item of result.scoredKeywords) {
+      expect(item.source).toBe('mock');
+      expect(item.confidence).toBe(0.5);
+    }
+    expect(result.indexData).toBeDefined();
+    expect(result.indexData).toHaveLength(2);
+  });
+
+  it('marks source as ai when no index data matches', async () => {
+    const emptyProvider: IndexProvider = {
+      name: 'empty',
+      async fetch() {
+        return [];
+      },
+    };
+
+    const { extractKeywordsWithAI } = await import('./keywords');
+    const result = await extractKeywordsWithAI('测试行业', 'fake-key', emptyProvider);
+
+    expect(result.scoredKeywords[0].source).toBe('ai');
+    expect(result.scoredKeywords[0].confidence).toBeUndefined();
+  });
+
+  it('uses real index data over LLM estimates', async () => {
+    const realProvider: IndexProvider = {
+      name: 'real',
+      async fetch(keywords) {
+        return keywords.map((keyword) => ({
+          keyword,
+          searchVolume: 5,
+          competition: 1,
+          source: 'baidu' as const,
+          confidence: 0.9,
+        }));
+      },
+    };
+
+    const { extractKeywordsWithAI } = await import('./keywords');
+    const result = await extractKeywordsWithAI('测试行业', 'fake-key', realProvider);
+
+    expect(result.scoredKeywords[0]).toMatchObject({
+      searchVolume: 5,
+      competition: 1,
+      source: 'mixed',
+      confidence: 0.9,
+    });
   });
 });

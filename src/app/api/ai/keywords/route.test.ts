@@ -16,6 +16,7 @@ vi.mock('next-auth', async () => {
 
 vi.mock('@/lib/ai/keywords', () => ({
   extractKeywordsWithAI: vi.fn(),
+  createDefaultIndexProvider: vi.fn(() => ({ name: 'mock', fetch: vi.fn() })),
 }));
 
 function mockSession(userId: string) {
@@ -79,6 +80,39 @@ describe('POST /api/ai/keywords', () => {
       keyword: 'k1',
       score: 5,
     });
+  });
+
+  it('保存研究历史并记录指数数据', async () => {
+    const user = await createUser();
+    mockSession(user.id);
+    vi.mocked(extractKeywordsWithAI).mockResolvedValue({
+      combinedSearchQueries: ['q1'],
+      coreKeywords: ['k1'],
+      longTailKeywords: ['long1'],
+      painPoints: ['p1'],
+      competitorAccounts: ['c1'],
+      searchCommands: { douyin: ['d1'], xiaohongshu: [], zhihu: [], baidu: [] },
+      scoredKeywords: [
+        { keyword: 'k1', searchVolume: 5, competition: 2, businessIntent: 5, score: 5, source: 'mixed', confidence: 0.9 },
+      ],
+      indexData: [{ keyword: 'k1', searchVolume: 5, competition: 2, source: 'baidu', confidence: 0.9 }],
+    });
+    const req = new NextRequest('http://localhost:3000/api/ai/keywords', {
+      method: 'POST',
+      body: JSON.stringify({ industry: '英语培训' }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const { prisma } = await import('@/lib/test/setup');
+    const history = await prisma.aiResearchHistory.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(history).not.toBeNull();
+    expect(history?.industry).toBe('英语培训');
+    expect(history?.usedRealIndexData).toBe(true);
+    expect((history?.indexData as unknown[] | null)?.length).toBe(1);
   });
 
   it('超出每日额度时返回 403', async () => {

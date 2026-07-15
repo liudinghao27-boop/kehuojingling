@@ -1,5 +1,11 @@
 import { createAIClient, getAIModel, hasAIKeyConfigured } from './client';
 import { getErrorMessage } from '../errors';
+import {
+  createDefaultIndexProvider,
+  IndexProvider,
+  IndexDataPoint,
+  mockIndexProvider,
+} from './index-api';
 
 export interface ScoredKeyword {
   keyword: string;
@@ -7,6 +13,8 @@ export interface ScoredKeyword {
   competition: number; // 1-5
   businessIntent: number; // 1-5
   score: number; // 综合热度分 1-5，由 LLM 给出或本地计算
+  source?: 'ai' | 'baidu' | 'douyin' | 'mock' | 'mixed';
+  confidence?: number; // 0-1
 }
 
 export interface KeywordResearchResult {
@@ -22,6 +30,7 @@ export interface KeywordResearchResult {
     baidu: string[];
   };
   scoredKeywords: ScoredKeyword[];
+  indexData?: IndexDataPoint[];
 }
 
 const SYSTEM_PROMPT = `你是一位通用的中文搜索意图与关键词优化专家。你的任务是根据用户输入的任意行业/产品/服务/人群描述，输出一份结构化、可直接用于社交媒体获客的关键词研究报告。
@@ -91,7 +100,11 @@ const SYSTEM_PROMPT = `你是一位通用的中文搜索意图与关键词优化
 - 不要把所有长尾词都写成"XXX哪家好"一种类型
 - competitorAccounts 不要编造真实存在的账号名，只输出方向性命名`;
 
-export async function extractKeywordsWithAI(industry: string, apiKey?: string): Promise<KeywordResearchResult> {
+export async function extractKeywordsWithAI(
+  industry: string,
+  apiKey?: string,
+  indexProvider: IndexProvider | null = createDefaultIndexProvider()
+): Promise<KeywordResearchResult> {
   if (!hasAIKeyConfigured(apiKey)) {
     throw new Error('未配置 AI API Key，请在「设置 > AI 模型配置」中填写 DeepSeek API Key');
   }
@@ -118,7 +131,12 @@ export async function extractKeywordsWithAI(industry: string, apiKey?: string): 
     }
 
     const result = JSON.parse(content);
-    return normalizeResult(result);
+    const normalized = normalizeResult(result);
+
+    if (indexProvider) {
+      return mergeWithIndexData(normalized, indexProvider);
+    }
+    return normalized;
   } catch (error) {
     console.error('[DeepSeek] API call failed:', getErrorMessage(error));
     throw error;
@@ -129,6 +147,65 @@ function normalizeScore(value: unknown): number {
   const num = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(num)) return 1;
   return Math.max(1, Math.min(5, Math.round(num)));
+}
+
+function calculateScore(searchVolume: number, businessIntent: number, competition: number): number {
+  return Math.max(1, Math.min(5, Math.round((searchVolume + businessIntent - competition * 0.5) / 2)));
+}
+
+async function mergeWithIndexData(
+  result: KeywordResearchResult,
+  indexProvider: IndexProvider
+): Promise<KeywordResearchResult> {
+  if (result.scoredKeywords.length === 0) {
+    return result;
+  }
+
+  const keywords = result.scoredKeywords.map((item) => item.keyword);
+  let indexData: IndexDataPoint[] = [];
+  try {
+    indexData = await indexProvider.fetch(keywords);
+  } catch (error) {
+    console.warn('[index] Failed to fetch index data:', getErrorMessage(error));
+  }
+
+  const byKeyword = new Map(indexData.map((item) => [item.keyword, item]));
+  const hasRealData = indexData.some((item) => item.source === 'baidu' || item.source === 'douyin');
+
+  const scoredKeywords = result.scoredKeywords.map((item) => {
+    const real = byKeyword.get(item.keyword);
+    if (!real) {
+      return { ...item, source: 'ai' as const };
+    }
+
+    const searchVolume = real.searchVolume ?? item.searchVolume;
+    const competition = real.competition ?? item.competition;
+    const businessIntent = item.businessIntent;
+    const score = calculateScore(searchVolume, businessIntent, competition);
+
+    const source: ScoredKeyword['source'] =
+      hasRealData && (real.source === 'baidu' || real.source === 'douyin')
+        ? 'mixed'
+        : real.source === 'mock'
+          ? 'mock'
+          : 'ai';
+
+    return {
+      ...item,
+      searchVolume,
+      competition,
+      businessIntent,
+      score,
+      source,
+      confidence: real.confidence,
+    };
+  });
+
+  return {
+    ...result,
+    scoredKeywords,
+    indexData,
+  };
 }
 
 export function normalizeResult(result: Record<string, unknown>): KeywordResearchResult {
@@ -150,7 +227,7 @@ export function normalizeResult(result: Record<string, unknown>): KeywordResearc
       const searchVolume = normalizeScore(entry.searchVolume);
       const competition = normalizeScore(entry.competition);
       const businessIntent = normalizeScore(entry.businessIntent);
-      const score = entry.score !== undefined ? normalizeScore(entry.score) : Math.max(1, Math.min(5, Math.round((searchVolume + businessIntent - competition * 0.5) / 2)));
+      const score = entry.score !== undefined ? normalizeScore(entry.score) : calculateScore(searchVolume, businessIntent, competition);
       return {
         keyword: typeof entry.keyword === 'string' ? entry.keyword : '',
         searchVolume,
@@ -176,3 +253,6 @@ export function normalizeResult(result: Record<string, unknown>): KeywordResearc
     scoredKeywords,
   };
 }
+
+export { createDefaultIndexProvider, mockIndexProvider };
+export type { IndexProvider, IndexDataPoint };

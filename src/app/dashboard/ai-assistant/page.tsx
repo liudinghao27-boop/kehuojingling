@@ -20,6 +20,8 @@ interface ScoredKeyword {
   competition: number;
   businessIntent: number;
   score: number;
+  source?: 'ai' | 'baidu' | 'douyin' | 'mock' | 'mixed';
+  confidence?: number;
 }
 
 interface KeywordResult {
@@ -35,6 +37,7 @@ interface KeywordResult {
     baidu: string[];
   };
   scoredKeywords: ScoredKeyword[];
+  indexData?: unknown[];
 }
 
 interface ResearchResult {
@@ -82,6 +85,7 @@ export default function AiAssistantPage() {
   const [loadingKeywords, setLoadingKeywords] = useState(false);
   const [loadingResearch, setLoadingResearch] = useState(false);
   const [keywordResult, setKeywordResult] = useState<KeywordResult | null>(null);
+  const [usedRealIndexData, setUsedRealIndexData] = useState(false);
   const [researchResult, setResearchResult] = useState<ResearchResult | null>(null);
   const [selectedKeywords, setSelectedKeywords] = useState<Set<string>>(new Set());
   const [monitorKeywords, setMonitorKeywords] = useState<Set<string>>(new Set());
@@ -171,6 +175,12 @@ export default function AiAssistantPage() {
         throw new Error(data.error || "提取失败");
       }
       setKeywordResult(data.data);
+      setUsedRealIndexData(
+        data.data.scoredKeywords?.some(
+          (item: ScoredKeyword) =>
+            item.source === "baidu" || item.source === "douyin" || item.source === "mixed"
+        ) ?? false
+      );
       setSelectedKeywords(new Set());
       addToast("关键词提取完成", "success");
     } catch (error) {
@@ -274,10 +284,12 @@ export default function AiAssistantPage() {
             baidu: [],
           },
           scoredKeywords: (record.scoredKeywords as ScoredKeyword[]) || [],
+          indexData: (record.indexData as unknown[]) || undefined,
         });
       } else {
         setKeywordResult(null);
       }
+      setUsedRealIndexData(record.usedRealIndexData ?? false);
 
       if (record.researchSummary || record.researchKeywords?.length > 0) {
         setResearchResult({
@@ -771,7 +783,15 @@ export default function AiAssistantPage() {
                   </Button>
                 </CardHeader>
                 <CardContent className="p-8 space-y-6">
-                  <KeywordScoreChart keywords={keywordResult.scoredKeywords} />
+                  <KeywordScoreChart
+                    keywords={keywordResult.scoredKeywords}
+                    source={keywordResult.scoredKeywords.find((k) => k.source)?.source}
+                  />
+                  {usedRealIndexData && (
+                    <p className="text-xs text-green-600 font-medium">
+                      已接入真实指数数据辅助评分
+                    </p>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
