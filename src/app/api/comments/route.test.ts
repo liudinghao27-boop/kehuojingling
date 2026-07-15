@@ -148,4 +148,18 @@ describe('GET /api/comments', () => {
     const json = await res.json();
     expect(json.comments).toHaveLength(0);
   });
+
+  it('支持按 matchedKeywords 中的关键词过滤', async () => {
+    const user = await createUser();
+    const video = await createVideo(user.id);
+    await createComment(video.id, { content: 'Comment A', matchedKeywords: ['玫瑰包装'] });
+    const match = await createComment(video.id, { content: 'Comment B', matchedKeywords: ['花艺培训'] });
+    mockSession(user.id);
+    const req = new NextRequest('http://localhost:3000/api/comments?keyword=花艺培训');
+    const res = await GET(req);
+    const json = await res.json();
+    expect(json.comments).toHaveLength(1);
+    expect(json.comments[0].id).toBe(match.id);
+    expect(json.comments[0].matchedKeywords).toContain('花艺培训');
+  });
 });

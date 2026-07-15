@@ -33,6 +33,7 @@ interface Comment {
   authorAvatar?: string | null;
   intentScore: number;
   intentKeywords: string[];
+  matchedKeywords: string[];
   isNoise: boolean;
   noiseType: string | null;
   noiseReason: string | null;
@@ -116,6 +117,8 @@ function CommentsContent() {
   const [filter, setFilter] = useState<"all" | "high" | "new" | "sent">(intentParam === "high" ? "high" : "all");
   const [noiseFilter, setNoiseFilter] = useState<"all" | "false" | "true">("false");
   const [search, setSearch] = useState("");
+  const [keywordFilter, setKeywordFilter] = useState("");
+  const [keywordMonitors, setKeywordMonitors] = useState<{ id: string; keyword: string }[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 0 });
@@ -135,7 +138,15 @@ function CommentsContent() {
     pagination: { page: number; pageSize: number; total: number; totalPages: number };
     replyTemplates: Template[];
     dmTemplates: Template[];
+    keywordMonitors: { id: string; keyword: string }[];
   }
+
+  const fetchKeywordMonitors = useCallback(async () => {
+    const res = await fetch("/api/keywords/monitor");
+    if (!res.ok) throw new Error("加载监控词库失败");
+    const data = await res.json();
+    return data.items || [];
+  }, []);
 
   const fetchCommentsData = useCallback(async (): Promise<FetchCommentsResult> => {
     const params = new URLSearchParams();
@@ -145,13 +156,15 @@ function CommentsContent() {
     if (filter === "sent") params.set("status", "SENT");
     params.set("noise", noiseFilter);
     if (search.trim()) params.set("q", search.trim());
+    if (keywordFilter) params.set("keyword", keywordFilter);
     params.set("page", page.toString());
     params.set("pageSize", pageSize.toString());
     const url = `/api/comments?${params.toString()}`;
-    const [commentsRes, replyRes, dmRes] = await Promise.all([
+    const [commentsRes, replyRes, dmRes, monitorsRes] = await Promise.all([
       fetch(url),
       fetch("/api/templates?type=reply"),
       fetch("/api/templates?type=dm"),
+      fetchKeywordMonitors(),
     ]);
 
     if (!commentsRes.ok || !replyRes.ok || !dmRes.ok) {
@@ -169,8 +182,9 @@ function CommentsContent() {
       pagination: commentsData.pagination || { page: 1, pageSize, total: 0, totalPages: 0 },
       replyTemplates: replyData.templates || [],
       dmTemplates: dmData.templates || [],
+      keywordMonitors: monitorsRes,
     };
-  }, [videoId, filter, noiseFilter, search, page, pageSize]);
+  }, [videoId, filter, noiseFilter, search, keywordFilter, page, pageSize, fetchKeywordMonitors]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -180,6 +194,7 @@ function CommentsContent() {
       setPagination(result.pagination);
       setReplyTemplates(result.replyTemplates);
       setDmTemplates(result.dmTemplates);
+      setKeywordMonitors(result.keywordMonitors);
     } catch (error) {
       console.error("Fetch comments error:", error);
       addToast("加载评论数据失败", "error");
@@ -225,6 +240,7 @@ function CommentsContent() {
           setPagination(result.pagination);
           setReplyTemplates(result.replyTemplates);
           setDmTemplates(result.dmTemplates);
+          setKeywordMonitors(result.keywordMonitors);
         }
       })
       .catch((error) => {
@@ -416,6 +432,18 @@ function CommentsContent() {
                   </Button>
                 ))}
               </div>
+              <div className="w-full sm:w-44">
+                <select
+                  value={keywordFilter}
+                  onChange={(e) => { setKeywordFilter(e.target.value); setPage(1); }}
+                  className="w-full rounded-2xl bg-white border-0 px-4 py-3 h-auto text-gray-900 text-sm focus:ring-2 focus:ring-gray-200"
+                >
+                  <option value="">全部关键词</option>
+                  {keywordMonitors.map((m) => (
+                    <option key={m.id} value={m.keyword}>{m.keyword}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -543,6 +571,14 @@ function CommentsContent() {
                               {comment.isNoise && comment.noiseReason && (
                                 <div className="mt-2 text-xs text-gray-400">
                                   过滤原因：{comment.noiseReason}
+                                </div>
+                              )}
+                              {comment.matchedKeywords.length > 0 && (
+                                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs text-gray-400">命中监控词：</span>
+                                  {comment.matchedKeywords.map((k) => (
+                                    <Badge key={k} variant="outline" className="rounded-full text-xs">{k}</Badge>
+                                  ))}
                                 </div>
                               )}
                               <div className="mt-3 flex items-center gap-4 text-xs text-gray-400 flex-wrap">

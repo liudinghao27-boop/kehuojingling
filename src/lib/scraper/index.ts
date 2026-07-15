@@ -4,6 +4,17 @@ import { tryDecryptAiApiKey } from '../encryption';
 import { getErrorMessage } from '../errors';
 import { parseVideoUrl, scrapeComments, scrapeCommentsReal } from './douyin';
 
+export function extractMatchedKeywords(content: string, keywords: string[]): string[] {
+  const lowerContent = content.toLowerCase();
+  const matched = new Set<string>();
+  for (const keyword of keywords) {
+    if (lowerContent.includes(keyword.toLowerCase())) {
+      matched.add(keyword);
+    }
+  }
+  return Array.from(matched);
+}
+
 export async function scrapeAndSaveComments(videoId: string, url: string) {
   console.log(`[Scrape] Processing video ${videoId}: ${url}`);
 
@@ -28,13 +39,22 @@ export async function scrapeAndSaveComments(videoId: string, url: string) {
       return { success: true, commentsCount: 0 };
     }
 
-    // 3. 获取视频所属用户的行业上下文
+    // 3. 获取视频所属用户的行业上下文与监控词库
     const video = await prisma.video.findUnique({
       where: { id: videoId },
-      include: { user: true },
+      include: { user: true, keywordMonitor: { select: { id: true, keyword: true } } },
     });
     const industryContext = video?.user?.industryContext || undefined;
     const aiApiKey = tryDecryptAiApiKey(video?.user?.aiApiKey) || undefined;
+
+    const keywordMonitors = video
+      ? await prisma.keywordMonitor.findMany({
+          where: { userId: video.userId },
+          select: { id: true, keyword: true },
+        })
+      : [];
+    const allKeywords = keywordMonitors.map((m) => m.keyword);
+    const videoKeyword = video?.keywordMonitor?.keyword;
 
     // 4. 过滤已存在的评论
     const newComments = [];
@@ -76,6 +96,11 @@ export async function scrapeAndSaveComments(videoId: string, url: string) {
         console.log(`[Scrape] Save low intent comment (${analysis.score}分): ${comment.content.slice(0, 30)}`);
       }
 
+      const matchedKeywords = extractMatchedKeywords(comment.content, allKeywords);
+      if (videoKeyword && !matchedKeywords.includes(videoKeyword)) {
+        matchedKeywords.push(videoKeyword);
+      }
+
       const saved = await prisma.comment.create({
         data: {
           content: comment.content,
@@ -84,6 +109,7 @@ export async function scrapeAndSaveComments(videoId: string, url: string) {
           videoId,
           intentScore: analysis.isNoise ? 1 : analysis.score,
           intentKeywords: analysis.isNoise ? [] : analysis.keywords,
+          matchedKeywords,
           isNoise: analysis.isNoise,
           noiseType: analysis.isNoise ? analysis.noiseType : null,
           noiseReason: analysis.isNoise ? analysis.noiseReason || analysis.reason : null,

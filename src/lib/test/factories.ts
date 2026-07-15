@@ -28,6 +28,7 @@ export async function createVideo(
     platform: 'DOUYIN' | 'KUAISHOU' | 'SHIPINHAO';
     title: string;
     author: string;
+    keywordMonitorId: string | null;
   }> = {}
 ) {
   return prisma.video.create({
@@ -37,6 +38,7 @@ export async function createVideo(
       title: overrides.title ?? 'Test Video',
       author: overrides.author ?? 'Test Author',
       userId,
+      keywordMonitorId: overrides.keywordMonitorId ?? null,
     },
   });
 }
@@ -49,6 +51,7 @@ export async function createComment(
     authorAvatar: string;
     intentScore: number;
     intentKeywords: string[];
+    matchedKeywords: string[];
     status: 'NEW' | 'ANALYZED' | 'REPLIED' | 'DM_SENT' | 'CONVERTED';
     isNoise: boolean;
   }> = {}
@@ -61,8 +64,25 @@ export async function createComment(
       videoId,
       intentScore: overrides.intentScore ?? 0,
       intentKeywords: overrides.intentKeywords,
+      matchedKeywords: overrides.matchedKeywords ?? [],
       status: overrides.status ?? 'NEW',
       isNoise: overrides.isNoise ?? false,
+    },
+  });
+}
+
+export async function createKeywordMonitor(
+  userId: string,
+  overrides: Partial<{
+    keyword: string;
+    source: string;
+  }> = {}
+) {
+  return prisma.keywordMonitor.create({
+    data: {
+      userId,
+      keyword: overrides.keyword ?? 'Test Keyword',
+      source: overrides.source,
     },
   });
 }

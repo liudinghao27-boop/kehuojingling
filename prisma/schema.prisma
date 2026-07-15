@@ -57,12 +57,15 @@ model Video {
   lastScrapedAt       DateTime?
   consecutiveFailures Int       @default(0)
   userId              String
+  keywordMonitorId    String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  user        User      @relation(fields: [userId], references: [id])
-  comments    Comment[]
+  user           User           @relation(fields: [userId], references: [id])
+  comments       Comment[]
+  keywordMonitor KeywordMonitor? @relation(fields: [keywordMonitorId], references: [id], onDelete: SetNull)
 
+  @@index([keywordMonitorId])
   @@map("videos")
 }
 
@@ -73,6 +76,7 @@ model Comment {
   authorAvatar String?
   intentScore Int       @default(0) // 1-5
   intentKeywords String[]
+  matchedKeywords String[]
   isNoise     Boolean   @default(false)
   noiseType   String?   // peer | vendor | scam | offtopic | emotional | none
   noiseReason String?   @db.Text
@@ -216,6 +220,8 @@ model AiResearchHistory {
   competitorAccounts    String[]
   searchCommands        Json?
   scoredKeywords        Json?     // 含搜索量/竞争度/商业意向评分的关键词
+  indexData             Json?     // 原始指数 API 响应数据
+  usedRealIndexData     Boolean   @default(false) // 是否使用了真实指数数据
   researchSummary       String?   @db.Text
   researchHotTopics     String[]
   researchPainPoints    String[]
@@ -242,6 +248,7 @@ model KeywordMonitor {
   updatedAt DateTime @updatedAt
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videos    Video[]
 
   @@unique([userId, keyword])
   @@index([userId, updatedAt])

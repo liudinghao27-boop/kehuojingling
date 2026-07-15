@@ -32,6 +32,11 @@ const statusMap: Record<string, { label: string; variant: "default" | "secondary
   ERROR: { label: "异常", variant: "destructive" },
 };
 
+interface KeywordMonitor {
+  id: string;
+  keyword: string;
+}
+
 interface Video {
   id: string;
   url: string;
@@ -41,6 +46,7 @@ interface Video {
   status: string;
   comments: number;
   highIntent: number;
+  keywordMonitor: KeywordMonitor | null;
   lastScrapedAt: string | null;
   createdAt: string;
 }
@@ -59,6 +65,8 @@ function formatLastScraped(dateString: string | null) {
 export default function VideosPage() {
   const { addToast } = useToast();
   const [videos, setVideos] = useState<Video[]>([]);
+  const [keywordMonitors, setKeywordMonitors] = useState<KeywordMonitor[]>([]);
+  const [selectedKeywordMonitorId, setSelectedKeywordMonitorId] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [newUrl, setNewUrl] = useState("");
@@ -72,6 +80,13 @@ export default function VideosPage() {
     if (!res.ok) throw new Error('获取视频列表失败');
     const data = await res.json();
     return data.videos || [];
+  }, []);
+
+  const fetchKeywordMonitors = useCallback(async (): Promise<KeywordMonitor[]> => {
+    const res = await fetch('/api/keywords/monitor');
+    if (!res.ok) throw new Error('获取监控词库失败');
+    const data = await res.json();
+    return data.items || [];
   }, []);
 
   const exportToCSV = () => {
@@ -102,9 +117,12 @@ export default function VideosPage() {
 
   useEffect(() => {
     let ignore = false;
-    fetchVideosData()
-      .then((items) => {
-        if (!ignore) setVideos(items);
+    Promise.all([fetchVideosData(), fetchKeywordMonitors()])
+      .then(([items, monitors]) => {
+        if (!ignore) {
+          setVideos(items);
+          setKeywordMonitors(monitors);
+        }
       })
       .catch((error) => {
         if (!ignore) {
@@ -118,17 +136,23 @@ export default function VideosPage() {
     return () => {
       ignore = true;
     };
-  }, [fetchVideosData, addToast]);
+  }, [fetchVideosData, fetchKeywordMonitors, addToast]);
 
   const handleAddVideo = async () => {
     if (!newUrl.trim()) { addToast("请输入视频链接", "error"); return; }
-    
+
     setSubmitting(true);
     try {
-      const res = await fetch('/api/videos', {
+      const endpoint = selectedKeywordMonitorId ? '/api/videos/from-keyword' : '/api/videos';
+      const body: Record<string, string> = { url: newUrl, platform: selectedPlatform };
+      if (selectedKeywordMonitorId) {
+        body.keywordMonitorId = selectedKeywordMonitorId;
+      }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: newUrl, platform: selectedPlatform }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
@@ -139,6 +163,7 @@ export default function VideosPage() {
 
       setVideos([data.video, ...videos]);
       setNewUrl("");
+      setSelectedKeywordMonitorId("");
       const msg = data.video.comments > 0
         ? `视频添加成功，已抓取 ${data.video.comments} 条评论`
         : '视频添加成功，开始监控';
@@ -256,6 +281,20 @@ export default function VideosPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="w-full sm:w-48">
+                <label className="block text-sm font-medium text-gray-500 mb-2">关联监控词（可选）</label>
+                <Select value={selectedKeywordMonitorId} onValueChange={setSelectedKeywordMonitorId}>
+                  <SelectTrigger className="rounded-2xl bg-white border-0 px-4 py-3 h-auto text-gray-900 text-sm focus:ring-2 focus:ring-gray-200">
+                    <SelectValue placeholder="选择监控词" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">无</SelectItem>
+                    {keywordMonitors.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>{m.keyword}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 onClick={handleAddVideo}
                 disabled={submitting}
@@ -318,6 +357,9 @@ export default function VideosPage() {
                               </span>
                               <span className="font-medium text-gray-900 truncate">{video.title}</span>
                               <Badge variant={status.variant} className="rounded-full">{status.label}</Badge>
+                              {video.keywordMonitor && (
+                                <Badge variant="outline" className="rounded-full">关键词：{video.keywordMonitor.keyword}</Badge>
+                              )}
                             </div>
                             <div className="mt-2 text-sm text-gray-400">
                               {video.author} · {video.comments} 条评论 · {video.highIntent} 高意向 · {formatLastScraped(video.lastScrapedAt)}

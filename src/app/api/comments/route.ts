@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
     const intent = searchParams.get('intent'); // 'high' for intentScore >= threshold
     const status = searchParams.get('status');
     const noise = searchParams.get('noise'); // 'true' | 'false' | 'all', default 'false'
+    const keyword = searchParams.get('keyword')?.trim();
     const q = searchParams.get('q')?.trim();
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '10', 10)));
@@ -63,6 +64,10 @@ export async function GET(req: NextRequest) {
       ];
     }
 
+    if (keyword) {
+      where.matchedKeywords = { has: keyword };
+    }
+
     // 不使用事务：count 和 findMany 允许轻微不一致，避免连接池紧张时 transaction timeout
     const [total, comments] = await Promise.all([
       prisma.comment.count({ where }),
@@ -100,6 +105,7 @@ export async function GET(req: NextRequest) {
         authorAvatar: comment.authorAvatar,
         intentScore: comment.intentScore,
         intentKeywords: comment.intentKeywords,
+        matchedKeywords: comment.matchedKeywords,
         isNoise: comment.isNoise,
         noiseType: comment.noiseType,
         noiseReason: comment.noiseReason,

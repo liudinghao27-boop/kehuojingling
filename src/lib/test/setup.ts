@@ -21,6 +21,7 @@ export async function clearDatabase() {
       "dms",
       "comments",
       "videos",
+      "keyword_monitors",
       "platform_credentials",
       "reply_templates",
       "dm_templates",

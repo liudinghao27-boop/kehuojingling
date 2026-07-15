@@ -10,6 +10,7 @@ import { z } from 'zod';
 const createSchema = z.object({
   url: z.string().min(1, '请输入视频链接'),
   platform: z.enum(['DOUYIN', 'KUAISHOU', 'SHIPINHAO']).default('DOUYIN'),
+  keywordMonitorId: z.string().optional(),
 });
 
 export async function GET() {
@@ -22,6 +23,9 @@ export async function GET() {
     const videos = await prisma.video.findMany({
       where: { userId: session.user.id },
       include: {
+        keywordMonitor: {
+          select: { id: true, keyword: true },
+        },
         _count: {
           select: { comments: true },
         },
@@ -51,6 +55,7 @@ export async function GET() {
       status: video.status,
       comments: video._count.comments,
       highIntent: highIntentMap.get(video.id) || 0,
+      keywordMonitor: video.keywordMonitor,
       lastScrapedAt: video.lastScrapedAt?.toISOString() || null,
       createdAt: video.createdAt.toISOString(),
     }));
@@ -79,7 +84,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { url, platform } = result.data;
+    const { url, platform, keywordMonitorId } = result.data;
+
+    if (keywordMonitorId) {
+      const keywordMonitor = await prisma.keywordMonitor.findFirst({
+        where: { id: keywordMonitorId, userId: session.user.id },
+      });
+      if (!keywordMonitor) {
+        return NextResponse.json(
+          { error: '监控关键词不存在或无权访问' },
+          { status: 403 }
+        );
+      }
+    }
 
     const plan = (session.user.plan || 'FREE') as PlanType;
     const limitCheck = await checkPlanLimit(session.user.id, plan, 'videos');
@@ -103,6 +120,7 @@ export async function POST(req: NextRequest) {
         author: parsedVideo.platform,
         status: 'MONITORING',
         userId: session.user.id,
+        keywordMonitorId: keywordMonitorId || null,
       },
     });
 
