@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+require('dotenv').config();
 const { execSync, spawn } = require('child_process');
 
 function killProcessOnPort(port) {
@@ -17,6 +18,7 @@ function killProcessOnPort(port) {
     }
 
     for (const pid of pids) {
+      if (!pid || pid === '0') continue;
       try {
         execSync(`taskkill /PID ${pid} /F`, { shell: 'cmd.exe' });
         console.log(`Killed process ${pid} on port ${port}`);
@@ -31,8 +33,20 @@ function killProcessOnPort(port) {
 
 async function checkPostgres() {
   const { Client } = require('pg');
+  const { parse } = require('pg-connection-string');
+
+  if (!process.env.DATABASE_URL) {
+    console.warn('[dev-clean] 未配置 DATABASE_URL，跳过数据库检测');
+    return false;
+  }
+
+  const config = parse(process.env.DATABASE_URL);
   const client = new Client({
-    connectionString: process.env.DATABASE_URL,
+    host: config.host,
+    port: config.port ? Number(config.port) : 5432,
+    user: config.user,
+    password: config.password,
+    database: config.database,
     connectionTimeoutMillis: 2000,
   });
   try {
@@ -75,7 +89,9 @@ async function main() {
   const dbOk = await checkPostgres().catch(() => false);
   const redisOk = await checkRedis().catch(() => false);
 
-  if (!dbOk || !redisOk) {
+  if (dbOk && redisOk) {
+    console.log('[dev-clean] PostgreSQL 与 Redis 检测通过');
+  } else {
     console.warn('[dev-clean] 部分依赖服务未启动，继续启动 Next.js（队列等功能可能不可用）');
     console.warn('[dev-clean] 如需启动完整环境，请先运行：npm run docker:up');
   }
