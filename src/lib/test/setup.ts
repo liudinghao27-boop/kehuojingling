@@ -22,6 +22,7 @@ export async function clearDatabase() {
       "comments",
       "videos",
       "keyword_monitors",
+      "sender_accounts",
       "platform_credentials",
       "reply_templates",
       "dm_templates",

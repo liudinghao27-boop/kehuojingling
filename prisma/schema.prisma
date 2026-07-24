@@ -28,6 +28,7 @@ model User {
   aiResearchHistory AiResearchHistory[]
   platformCredentials PlatformCredential[]
   keywordMonitors KeywordMonitor[]
+  senderAccounts SenderAccount[]
 
   @@map("users")
 }
@@ -253,4 +254,34 @@ model KeywordMonitor {
   @@unique([userId, keyword])
   @@index([userId, updatedAt])
   @@map("keyword_monitors")
+}
+
+model SenderAccount {
+  id            String        @id @default(cuid())
+  userId        String
+  platform      Platform      @default(DOUYIN)
+  label         String        // 账号备注，如"主号""小号1"
+  cookies       String        @db.Text // 加密存储
+  proxyUrl      String?
+  status        AccountStatus @default(ACTIVE)
+  healthScore   Int           @default(100) // 0-100
+  failCount     Int           @default(0)   // 连续失败次数
+  lastFailAt    DateTime?
+  lastSuccessAt DateTime?
+  dailySent     Int           @default(0)   // 当日已发送
+  dailyLimit    Int           @default(50)  // 账号日限额
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, platform, status])
+  @@map("sender_accounts")
+}
+
+enum AccountStatus {
+  ACTIVE
+  COOLING
+  DISABLED
+  EXPIRED
 }

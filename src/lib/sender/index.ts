@@ -17,6 +17,7 @@ import {
 import { getActiveProvider, hasProvider } from './config';
 
 export type { SendResult };
+export { getActiveProvider as getSenderProvider };
 
 async function fetchCredentials(
   userId: string,

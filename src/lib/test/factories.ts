@@ -86,3 +86,37 @@ export async function createKeywordMonitor(
     },
   });
 }
+
+export async function createSenderAccount(
+  userId: string,
+  overrides: Partial<{
+    platform: 'DOUYIN' | 'KUAISHOU' | 'SHIPINHAO';
+    label: string;
+    cookies: string;
+    proxyUrl: string | null;
+    status: 'ACTIVE' | 'COOLING' | 'DISABLED' | 'EXPIRED';
+    healthScore: number;
+    failCount: number;
+    dailySent: number;
+    dailyLimit: number;
+    lastFailAt: Date | null;
+    lastSuccessAt: Date | null;
+  }> = {}
+) {
+  return prisma.senderAccount.create({
+    data: {
+      userId,
+      platform: overrides.platform ?? 'DOUYIN',
+      label: overrides.label ?? 'Test Account',
+      cookies: overrides.cookies ?? 'sessionid=test-cookie',
+      proxyUrl: overrides.proxyUrl ?? null,
+      status: overrides.status ?? 'ACTIVE',
+      healthScore: overrides.healthScore ?? 100,
+      failCount: overrides.failCount ?? 0,
+      dailySent: overrides.dailySent ?? 0,
+      dailyLimit: overrides.dailyLimit ?? 50,
+      lastFailAt: overrides.lastFailAt ?? null,
+      lastSuccessAt: overrides.lastSuccessAt ?? null,
+    },
+  });
+}
