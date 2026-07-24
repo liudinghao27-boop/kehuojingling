@@ -50,16 +50,17 @@
 
 ## 下次继续记录
 
-- **当前分支**：`main`
+- **当前分支**：`main`，工作区干净，方案 A Phase 1-3 全部完成并已提交。
 - **最近三次提交**：
-  1. `b2dfe42 feat: humanized sending, proxy support, UA fingerprint, safe-window scheduling (Phase 2)`
-  2. `b7defea feat: sender account management UI at /dashboard/accounts (Phase 1 complete)`
-  3. `175a184 feat: sender account pool with circuit breaker and compliance gating (Phase 1)`
-- **未提交改动**：Phase 3 全部改动（alert 模块/迁移/API/看板 UI/设置区块 + 测试）+ 计划勾选（测试已通过，待提交）
-- **下一步**：
-  1. 提交 Phase 3 → 方案 A Phase 1-3 全部完成
-  2. Phase 4（持续运营向）：Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动
-  3. 上线前遗留：`sender_accounts.cookies` 加密（`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`）；UA 池需随 Chrome 版本定期更新；队列积压/失败率主动告警（当前仅冷却触发）
+  1. `c1d32f0 feat: alerting, health dashboard, bulk account controls (Phase 3)`
+  2. `b2dfe42 feat: humanized sending, proxy support, UA fingerprint, safe-window scheduling (Phase 2)`
+  3. `b7defea feat: sender account management UI at /dashboard/accounts (Phase 1 complete)`
+- **今日人工实测**：dev 环境已验证可启动（首页/账号管理/设置页 200，API 未登录 401）；功能实测由用户进行，结果待反馈。
+- **明天开工**：
+  1. 收集人工实测反馈，修复发现的问题
+  2. 上线前必须：`sender_accounts.cookies` 加密存储（`account-pool.ts` 留有 TODO，`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`）
+  3. 增强项（按需）：队列积压/失败率主动告警（当前仅冷却触发）；UA 池随 Chrome 版本更新
+  4. Phase 4（持续运营向）：Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动
 
 ## 开发命令
 
