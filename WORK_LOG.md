@@ -19,6 +19,7 @@
 - **合规模块** `src/lib/safety/compliance.ts` 重写：敏感词库分层（联系方式/诱导词/违规词）、风险等级、`generateCompliantVariant` 自动改写、安全发送时间窗口。
 - **队列改造** `src/lib/queue/index.ts`：抽出 `processSendJob` 统一处理回复/私信，接入账号选择、发送前合规拦截与自动改写、失败熔断；新增 `maintenance` 队列（每日 0 点重置额度、每小时恢复冷却账号）；回复/私信队列加 Bull limiter。
 - **API**：`GET/POST /api/user/sender-accounts`、`GET/PATCH/DELETE /api/user/sender-accounts/[id]`（含归属校验、冷却恢复逻辑）。
+- **账号管理 UI**：`src/app/dashboard/accounts/page.tsx` —— 账号列表（平台/状态/健康度 badge、今日已发、最近成功时间、Skeleton 加载态）、平台筛选、新增/编辑 Dialog（编辑时 Cookies 留空不改、代理清空提交 null）、删除确认、状态操作（冷却恢复 / 禁用 / 启用）；`Navbar.tsx` 导航新增"账号管理"。
 - **测试**：新增 `src/lib/sender/account-pool.test.ts`（20+ 用例）、`src/app/api/user/sender-accounts/route.test.ts`、`[id]/route.test.ts`；测试基建新增 `createSenderAccount` 工厂，`clearDatabase` 增加 `sender_accounts` 表。
 - 修复 lint 未使用导入告警；`account-pool` 不再重复实现 `generateCompliantVariant`，改为从 `compliance` re-export。
 
@@ -33,14 +34,14 @@
 
 - **当前分支**：`main`
 - **最近三次提交**：
-  1. `c5d0f79 docs: update WORK_LOG with Phase 1-3 completion and commits`
-  2. `6f2792c feat: integrate real index API for keyword scoring (Phase 3)`
-  3. `43d80dc feat: bridge KeywordMonitor with video/comment monitoring (Phase 2)`
-- **未提交改动**：schema/account-pool/queue/compliance/sender API/测试（测试已通过，待提交）
+  1. `175a184 feat: sender account pool with circuit breaker and compliance gating (Phase 1)`
+  2. `c5d0f79 docs: update WORK_LOG with Phase 1-3 completion and commits`
+  3. `6f2792c feat: integrate real index API for keyword scoring (Phase 3)`
+- **未提交改动**：账号管理 UI（`dashboard/accounts/page.tsx` + Navbar）+ 计划文档勾选（测试已通过，待提交）
 - **下一步**：
-  1. 提交 Phase 1（含本 WORK_LOG）
-  2. 账号管理 UI（`/dashboard/accounts`，API 已就绪）
-  3. Phase 2：行为拟人化 + 代理池
+  1. 提交账号管理 UI → **Phase 1 全部完成**
+  2. Phase 2：行为拟人化（`simulateHumanBrowsing`/`humanType`）+ 代理池 + UA/指纹伪装 + 安全时间窗口
+  3. Phase 3：监控告警 + 健康度看板
 
 ## 开发命令
 

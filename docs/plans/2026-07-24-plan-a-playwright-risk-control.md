@@ -463,7 +463,7 @@ async function sendAlert(rule: keyof typeof ALERT_RULES, context: Record<string,
 - [x] 实现 `pickAccount` / `handleSendFailure`（`src/lib/sender/account-pool.ts`，含测试 `account-pool.test.ts`）
 - [x] 队列处理器接入账号选择（`src/lib/queue/index.ts` 的 `processSendJob`，含限流与维护队列）
 - [x] 发送前强制合规检查（`src/lib/safety/compliance.ts` 扩展 + 队列内拦截与自动改写）
-- [ ] 账号管理 UI（`/dashboard/accounts`，API 已就绪：`/api/user/sender-accounts`）
+- [x] 账号管理 UI（`/dashboard/accounts`）
 
 ### Phase 2：行为拟人化 + 代理（1-2 周）
 

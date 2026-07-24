@@ -29,6 +29,7 @@ export function Navbar({ className }: NavbarProps) {
     { href: "/dashboard/videos", label: "视频监控" },
     { href: "/dashboard/comments", label: "评论列表" },
     { href: "/dashboard/templates", label: "话术管理" },
+    { href: "/dashboard/accounts", label: "账号管理" },
     { href: "/dashboard/analytics", label: "数据报表" },
     { href: "/dashboard/ai-assistant", label: "AI 获客助手" },
   ];
