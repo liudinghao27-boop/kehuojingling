@@ -467,10 +467,10 @@ async function sendAlert(rule: keyof typeof ALERT_RULES, context: Record<string,
 
 ### Phase 2：行为拟人化 + 代理（1-2 周）
 
-- [ ] `simulateHumanBrowsing` / `humanType`
-- [ ] 代理池集成（支持 HTTP/SOCKS5）
-- [ ] User-Agent 池 + 指纹伪装
-- [ ] 安全时间窗口调度
+- [x] `simulateHumanBrowsing` / `humanType`（`src/lib/sender/humanize.ts`，douyin provider 全面接入）
+- [x] 代理池集成（支持 HTTP/SOCKS5，`src/lib/sender/proxy.ts` + launch/persistent context 注入 + 队列下传 `credentials.proxyUrl`）
+- [x] User-Agent 池 + 指纹伪装（`src/lib/sender/ua-pool.ts`，10 个 UA + 随机 viewport + stealth init script）
+- [x] 安全时间窗口调度（队列侧 `isSafeSendTime` 判断 + `job.moveToDelayed` 真正推迟，失败降级立即发送）
 
 ### Phase 3：监控告警 + 运营工具（1 周）
 

@@ -16,6 +16,9 @@ import {
   PlatformCredentials,
 } from '../types';
 import { randomDelay } from '../utils';
+import { humanType, simulateHumanBrowsing } from '../humanize';
+import { parseProxyUrl } from '../proxy';
+import { getRandomUserAgent, getRandomViewport, applyStealthScripts } from '../ua-pool';
 
 const DEFAULT_TIMEOUT = 30_000;
 const DEBUG_DIR = path.join(process.cwd(), 'logs', 'douyin-sender');
@@ -142,14 +145,35 @@ export function getCookies(
 
 type LaunchResult = { browser: Browser; context: BrowserContext };
 
-async function launchContext(): Promise<LaunchResult> {
+type LaunchOptions = {
+  /** 账号级代理 URL（credentials.proxyUrl），可选 */
+  proxyUrl?: string;
+};
+
+/**
+ * 构建 newContext / launchPersistentContext 共用的指纹选项：
+ * 随机 UA + 中文 locale/时区 + 小幅随机 viewport，避免固定指纹被批量关联。
+ */
+function buildContextFingerprintOptions() {
+  return {
+    userAgent: getRandomUserAgent(),
+    locale: 'zh-CN',
+    timezoneId: 'Asia/Shanghai',
+    viewport: getRandomViewport(),
+  };
+}
+
+async function launchContext(options: LaunchOptions = {}): Promise<LaunchResult> {
   const headless = isHeadless();
+  // 提前解析，非法代理地址直接抛出带「代理」字样的错误，而不是被包装成通用启动失败
+  const proxy = options.proxyUrl ? parseProxyUrl(options.proxyUrl) : undefined;
+  const launchProxyOption = proxy ? { proxy } : {};
+  const fingerprint = buildContextFingerprintOptions();
   try {
     if (headless) {
-      const browser = await chromium.launch({ headless: true });
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 800 },
-      });
+      const browser = await chromium.launch({ headless: true, ...launchProxyOption });
+      const context = await browser.newContext(fingerprint);
+      await applyStealthScripts(context);
       return { browser, context };
     }
 
@@ -161,8 +185,10 @@ async function launchContext(): Promise<LaunchResult> {
     try {
       const context = await chromium.launchPersistentContext(profileDir, {
         headless: false,
-        viewport: { width: 1280, height: 800 },
+        ...fingerprint,
+        ...launchProxyOption,
       });
+      await applyStealthScripts(context);
       console.log('[DouyinSender] 使用持久化浏览器上下文');
       const browser = context.browser();
       if (!browser) {
@@ -174,10 +200,9 @@ async function launchContext(): Promise<LaunchResult> {
       console.warn(`[DouyinSender] 持久化浏览器上下文启动失败: ${message}`);
       console.warn('[DouyinSender] 改用临时上下文（登录态不会持久化，重启 dev server 后需重新登录）');
       // 残留 Chrome 进程可能锁住了 profile，fallback 到非持久化上下文
-      const browser = await chromium.launch({ headless: false });
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 800 },
-      });
+      const browser = await chromium.launch({ headless: false, ...launchProxyOption });
+      const context = await browser.newContext(buildContextFingerprintOptions());
+      await applyStealthScripts(context);
       return { browser, context };
     }
   } catch (error) {
@@ -191,6 +216,8 @@ type SharedSenderState = {
   __douyinSenderBrowser?: Browser | null;
   __douyinSenderContext?: BrowserContext | null;
   __douyinSenderContextPromise?: Promise<BrowserContext> | null;
+  // 当前共享 context 的归属标识（cookies+proxy 哈希），用于判断能否复用
+  __douyinSenderContextKey?: string | null;
 };
 
 const g = globalThis as unknown as SharedSenderState;
@@ -200,17 +227,20 @@ function getSharedState() {
     browser: g.__douyinSenderBrowser ?? null,
     context: g.__douyinSenderContext ?? null,
     promise: g.__douyinSenderContextPromise ?? null,
+    key: g.__douyinSenderContextKey ?? null,
   };
 }
 
 function setSharedState(
   browser: Browser | null,
   context: BrowserContext | null,
-  promise: Promise<BrowserContext> | null
+  promise: Promise<BrowserContext> | null,
+  key: string | null
 ) {
   g.__douyinSenderBrowser = browser;
   g.__douyinSenderContext = context;
   g.__douyinSenderContextPromise = promise;
+  g.__douyinSenderContextKey = key;
 }
 
 let cleanupRegistered = false;
@@ -248,23 +278,57 @@ function registerCleanup() {
   });
 }
 
-async function getSharedContext(cookiesRaw: string | undefined): Promise<BrowserContext> {
+/**
+ * 简单字符串哈希，用于共享 context 的归属 key。
+ * 不追求加密强度，只要求不同 cookies/proxy 产生不同 key。
+ */
+function hashString(input: string): string {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
+}
+
+/**
+ * 共享 context 的缓存 key：hash(cookies) + hash(proxyUrl)。
+ * 多账号场景下 cookies 或代理不同就必须重启浏览器，
+ * 否则会串号（A 账号的登录态发给 B）或串代理（IP 与账号归属地对不上）。
+ */
+function sharedContextKey(cookiesRaw: string | undefined, proxyUrl: string | undefined): string {
+  return `${hashString(cookiesRaw ?? '')}:${hashString(proxyUrl ?? '')}`;
+}
+
+async function getSharedContext(
+  cookiesRaw: string | undefined,
+  proxyUrl: string | undefined
+): Promise<BrowserContext> {
   registerCleanup();
+  const desiredKey = sharedContextKey(cookiesRaw, proxyUrl);
   const state = getSharedState();
 
   if (state.context) {
-    try {
-      // 用 newPage 真实检测 context 是否还活着（pages() 在窗口刚关闭时可能不抛错）
-      const testPage = await state.context.newPage();
-      await testPage.close();
-      return state.context;
-    } catch {
-      console.log('[DouyinSender] 共享浏览器上下文已关闭，准备重启');
-      setSharedState(null, null, null);
+    if (state.key !== desiredKey) {
+      // cookies 或代理变化，旧 context 不能复用，关闭后重建
+      console.log('[DouyinSender] 账号 Cookie 或代理已变化，重启浏览器上下文');
+      const oldBrowser = state.browser;
+      setSharedState(null, null, null, null);
+      await oldBrowser?.close().catch(() => {});
+    } else {
+      try {
+        // 用 newPage 真实检测 context 是否还活着（pages() 在窗口刚关闭时可能不抛错）
+        const testPage = await state.context.newPage();
+        await testPage.close();
+        return state.context;
+      } catch {
+        console.log('[DouyinSender] 共享浏览器上下文已关闭，准备重启');
+        setSharedState(null, null, null, null);
+      }
     }
   }
 
-  if (getSharedState().promise) return getSharedState().promise!;
+  const pending = getSharedState();
+  if (pending.promise && pending.key === desiredKey) return pending.promise!;
 
   let resolveContext: (context: BrowserContext) => void;
   let rejectContext: (reason: unknown) => void;
@@ -272,7 +336,7 @@ async function getSharedContext(cookiesRaw: string | undefined): Promise<Browser
     resolveContext = resolve;
     rejectContext = reject;
   });
-  setSharedState(getSharedState().browser, null, startPromise);
+  setSharedState(getSharedState().browser, null, startPromise, desiredKey);
 
   (async () => {
     try {
@@ -282,8 +346,8 @@ async function getSharedContext(cookiesRaw: string | undefined): Promise<Browser
         await oldBrowser.close().catch(() => {});
       }
 
-      const { browser, context } = await launchContext();
-      setSharedState(browser, context, startPromise);
+      const { browser, context } = await launchContext({ proxyUrl });
+      setSharedState(browser, context, startPromise, desiredKey);
 
       if (cookiesRaw) {
         const cookies = parseCookies(cookiesRaw);
@@ -295,7 +359,7 @@ async function getSharedContext(cookiesRaw: string | undefined): Promise<Browser
       context.setDefaultTimeout(DEFAULT_TIMEOUT);
       resolveContext!(context);
     } catch (err) {
-      setSharedState(null, null, null);
+      setSharedState(null, null, null, null);
       rejectContext!(err);
     }
   })();
@@ -305,13 +369,14 @@ async function getSharedContext(cookiesRaw: string | undefined): Promise<Browser
 
 async function withBrowser<T>(
   cookiesRaw: string | undefined,
+  proxyUrl: string | undefined,
   operation: (page: Page) => Promise<T>
 ): Promise<T> {
   const headless = isHeadless();
 
   if (!headless) {
     // 可见模式：复用同一个浏览器上下文，避免每次重新登录
-    const context = await getSharedContext(cookiesRaw);
+    const context = await getSharedContext(cookiesRaw, proxyUrl);
     const page = await context.newPage();
     page.setDefaultTimeout(DEFAULT_TIMEOUT);
 
@@ -332,7 +397,7 @@ async function withBrowser<T>(
   }
 
   // 无头模式：每次新建上下文，保持原有行为
-  const { browser, context } = await launchContext();
+  const { browser, context } = await launchContext({ proxyUrl });
   try {
     context.setDefaultTimeout(DEFAULT_TIMEOUT);
 
@@ -776,6 +841,9 @@ async function sendReplyOperation(
     return { success: false, error: 'Cookie 失效或需要登录验证' };
   }
 
+  // 模拟真人浏览：随机滚动 + 鼠标移动，避免「打开页面直接找评论」的脚本特征
+  await simulateHumanBrowsing(page);
+
   // 从抓取数据获取到的 authorName 可能为截断/特殊符号，改用评论内容匹配
   const container = await findCommentContainer(page, commentContent || authorName);
   if (!container) {
@@ -804,7 +872,7 @@ async function sendReplyOperation(
     return { success: false, error: '未找到回复输入框' };
   }
 
-  await input.fill(content);
+  await humanType(input, content);
   console.log(`[DouyinSender:reply] 填写回复内容`);
   await randomDelay(1000, 2000);
 
@@ -952,11 +1020,11 @@ async function sendReplyOperation(
     // input 可能在验证后已失效，重新定位一次
     const freshInput = await locateReplyInput(page, container);
     if (freshInput) {
-      await freshInput.fill(content);
+      await humanType(freshInput, content);
       await randomDelay(800, 1500);
       await freshInput.press('Enter');
     } else if (input && (await input.evaluate(() => true).catch(() => false))) {
-      await input.fill(content);
+      await humanType(input, content);
       await randomDelay(800, 1500);
       await input.press('Enter');
     } else {
@@ -1022,6 +1090,9 @@ async function sendDmOperation(
   if (currentUrl.includes('login') || currentUrl.includes('verify')) {
     return { success: false, error: 'Cookie 失效或需要登录验证' };
   }
+
+  // 模拟真人浏览：随机滚动 + 鼠标移动，避免「打开页面直接找评论」的脚本特征
+  await simulateHumanBrowsing(page);
 
   const container = await findCommentContainer(page, commentContent || authorName);
   if (!container) {
@@ -1201,7 +1272,7 @@ async function sendDmOperation(
       return { success: false, error: '未找到私信输入框' };
     }
   }
-  await input.fill(content);
+  await humanType(input, content);
   console.log('[DouyinSender:dm] 填写私信内容');
   await randomDelay(1000, 2000);
 
@@ -1267,7 +1338,7 @@ export const douyinProvider: SenderProvider = {
     }
 
     try {
-      await withBrowser(cookies, async (page) => {
+      await withBrowser(cookies, credentials.proxyUrl, async (page) => {
         await page.goto('https://www.douyin.com/', {
           waitUntil: 'domcontentloaded',
         });
@@ -1301,7 +1372,9 @@ export const douyinProvider: SenderProvider = {
     }
 
     try {
-      return await withBrowser(cookies, (page) => sendReplyOperation(page, params));
+      return await withBrowser(cookies, params.credentials?.proxyUrl, (page) =>
+        sendReplyOperation(page, params)
+      );
     } catch (error) {
       return { success: false, error: normalizeSendError(error, '回复发送') };
     }
@@ -1314,7 +1387,9 @@ export const douyinProvider: SenderProvider = {
     }
 
     try {
-      return await withBrowser(cookies, (page) => sendDmOperation(page, params));
+      return await withBrowser(cookies, params.credentials?.proxyUrl, (page) =>
+        sendDmOperation(page, params)
+      );
     } catch (error) {
       return { success: false, error: normalizeSendError(error, '私信发送') };
     }

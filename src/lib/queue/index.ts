@@ -20,7 +20,7 @@ import {
   recoverCoolingAccounts,
   resetDailySentCounts,
 } from '../sender/account-pool';
-import { checkCompliance, generateCompliantVariant, getNextSafeSendTime } from '../safety/compliance';
+import { checkCompliance, generateCompliantVariant, getNextSafeSendTime, isSafeSendTime } from '../safety/compliance';
 import { getSenderProvider } from '../sender';
 import { Platform } from '@prisma/client';
 
@@ -146,14 +146,14 @@ async function initMaintenanceSchedule(maintenanceQueue: Bull.Queue) {
 // 发送处理器（回复/私信共用）
 // ---------------------------------------------------------------------------
 
-interface SendJobData {
+export interface SendJobData {
   commentId: string;
   templateId: string;
   accountId?: string;
   priority?: number;
 }
 
-async function processSendJob(
+export async function processSendJob(
   job: Bull.Job<SendJobData>,
   type: 'reply' | 'dm'
 ): Promise<{ success: boolean; skipped?: boolean; reason?: string }> {
@@ -235,12 +235,29 @@ async function processSendJob(
   console.log(`${logPrefix} 使用账号: ${account.label} (健康度: ${account.healthScore})`);
 
   // 5. 检查是否在安全发送窗口
-  const now = new Date();
-  const safeTime = getNextSafeSendTime();
-  if (safeTime > now) {
-    const delayMs = safeTime.getTime() - now.getTime();
-    console.log(`${logPrefix} 当前非安全发送窗口，延迟 ${Math.round(delayMs / 60000)} 分钟`);
-    // 注意：这里不实际延迟，由 Bull 的 backoff 机制处理重试
+  // WHY: getNextSafeSendTime() 在安全窗口内也会返回 5-30 分钟后的时间（拟人抖动），
+  // 这部分抖动已由入队时的 delay 与 Bull limiter 覆盖，若按返回值直接推迟，
+  // 每条消息都会被无谓地二次延迟 5-30 分钟。因此用 isSafeSendTime() 判断窗口，
+  // 仅在窗口外才把任务推迟到 getNextSafeSendTime() 给出的下一个安全窗口。
+  if (!isSafeSendTime()) {
+    const safeTime = getNextSafeSendTime();
+    const delayMs = safeTime.getTime() - Date.now();
+    console.log(`${logPrefix} 当前非安全发送窗口，推迟 ${Math.round(delayMs / 60000)} 分钟`);
+
+    // Bull v4 运行时支持 moveToDelayed（见 bull/lib/job.js），但其 index.d.ts 未声明；
+    // 且 Redis 不可用的直接执行模式没有 Bull job。因此做能力检测 + 失败降级，
+    // 不能让发送链路因调度问题崩溃。
+    const moveToDelayed = (job as { moveToDelayed?: (timestamp: number) => Promise<void> }).moveToDelayed;
+    if (typeof moveToDelayed === 'function') {
+      try {
+        await moveToDelayed.call(job, safeTime.getTime());
+        return { success: false, skipped: true, reason: 'outside-safe-window' };
+      } catch (error) {
+        console.error(`${logPrefix} 任务推迟失败，降级为立即发送:`, error);
+      }
+    } else {
+      console.warn(`${logPrefix} 当前环境不支持任务推迟（无 Bull job），降级为立即发送`);
+    }
   }
 
   // 6. 执行发送
@@ -257,7 +274,11 @@ async function processSendJob(
     content: templateContent,
     authorName: comment.authorName,
     commentContent: comment.content,
-    credentials: { cookies: account.cookies },
+    credentials: {
+      cookies: account.cookies,
+      // 账号配置了独立代理时下传给 provider，用于出口 IP 隔离；未配置则不加该键
+      ...(account.proxyUrl ? { proxyUrl: account.proxyUrl } : {}),
+    },
   };
 
   const result = type === 'reply'

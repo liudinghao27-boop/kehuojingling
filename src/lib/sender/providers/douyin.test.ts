@@ -48,6 +48,7 @@ function createFakeLocator(config: LocatorConfig = {}): Locator {
     click: () => Promise.resolve(),
     fill: () => Promise.resolve(),
     press: () => Promise.resolve(),
+    pressSequentially: () => Promise.resolve(),
     getAttribute: (name: string) => Promise.resolve(config.attribute?.[name] ?? ''),
     evaluate: () => Promise.resolve(config.evaluateResult),
   } as unknown as Locator;
@@ -73,6 +74,12 @@ function createFakePage(config: PageConfig = {}): Page {
     waitForSelector: () => Promise.resolve(createFakeLocator() as unknown as ElementHandle<Node>),
     setDefaultTimeout: () => {},
     screenshot: () => Promise.resolve(Buffer.from('')),
+    close: () => Promise.resolve(),
+    // 拟人化浏览会用到鼠标滚动/移动
+    mouse: {
+      wheel: () => Promise.resolve(),
+      move: () => Promise.resolve(),
+    },
     on: (event: string, handler: (...args: unknown[]) => void) => {
       if (!handlers[event]) handlers[event] = [];
       handlers[event].push(handler);
@@ -106,6 +113,7 @@ const fakeContext: BrowserContext = {
   browser: () => fakeBrowser,
   newPage: () => Promise.resolve(fakePage),
   addCookies: () => Promise.resolve(),
+  addInitScript: () => Promise.resolve(),
   setDefaultTimeout: () => {},
   waitForEvent: () => Promise.resolve(null),
   pages: () => Promise.resolve([]),
@@ -409,6 +417,180 @@ describe('douyinProvider', () => {
       });
       expect(result.success).toBe(false);
       expect(result.error).toBe('未配置抖音 Cookie');
+    });
+  });
+
+  describe('proxy 与指纹选项', () => {
+    const proxyReplyParams: SendReplyParams = {
+      userId: 'u1',
+      platform: 'DOUYIN',
+      videoUrl: 'https://www.douyin.com/video/123',
+      commentId: 'c1',
+      authorName: '作者',
+      commentContent: '这条评论内容很长用于匹配',
+      content: '感谢支持！',
+      credentials: {
+        cookies: JSON.stringify([{ name: 'sessionid', value: 'abc' }]),
+      },
+    };
+
+    function createHappyPage(): Page {
+      return createFakePage({
+        urlValue: 'https://www.douyin.com/video/123',
+        locators: {
+          'text=最新': createFakeLocator({ visible: false }),
+          [`[data-douyin-sender-`]: createFakeLocator({ visible: true }),
+          'text=回复': createFakeLocator({ visible: true }),
+          'textarea, [contenteditable="true"]': createFakeLocator({
+            visible: true,
+            count: 1,
+            evaluateResult: true,
+          }),
+        },
+        evaluateSequence: [
+          null, // detectAuthDialog
+          undefined, // prepareCommentSection scroll
+          true, // findCommentByJs: found
+          true, // input click send button
+          null, // detectBlock
+          false, // publishFailed
+          true, // verifyReplyPublished
+        ],
+      });
+    }
+
+    function mockedChromium() {
+      return chromium as unknown as {
+        launch: ReturnType<typeof vi.fn>;
+        launchPersistentContext: ReturnType<typeof vi.fn>;
+      };
+    }
+
+    function resetSharedState() {
+      const g = globalThis as unknown as Record<string, unknown>;
+      g.__douyinSenderBrowser = null;
+      g.__douyinSenderContext = null;
+      g.__douyinSenderContextPromise = null;
+      g.__douyinSenderContextKey = null;
+    }
+
+    it('credentials.proxyUrl 会传给 chromium.launch 的 proxy 选项', async () => {
+      setupLaunchMock(createHappyPage());
+
+      const result = await douyinProvider.sendReply({
+        ...proxyReplyParams,
+        credentials: {
+          ...proxyReplyParams.credentials,
+          proxyUrl: 'http://user:pass@1.2.3.4:8080',
+        },
+      });
+      expect(result.success).toBe(true);
+      expect(mockedChromium().launch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          proxy: {
+            server: 'http://1.2.3.4:8080',
+            username: 'user',
+            password: 'pass',
+          },
+        })
+      );
+    });
+
+    it('无 proxyUrl 时 launch 选项不含 proxy', async () => {
+      setupLaunchMock(createHappyPage());
+
+      const result = await douyinProvider.sendReply(proxyReplyParams);
+      expect(result.success).toBe(true);
+      const launchArg = mockedChromium().launch.mock.calls[0][0] as Record<string, unknown>;
+      expect(launchArg).not.toHaveProperty('proxy');
+    });
+
+    it('非法 proxyUrl 直接失败并提示代理问题', async () => {
+      setupLaunchMock(createHappyPage());
+
+      const result = await douyinProvider.sendReply({
+        ...proxyReplyParams,
+        credentials: {
+          ...proxyReplyParams.credentials,
+          proxyUrl: 'not-a-valid-url',
+        },
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('代理');
+    });
+
+    it('newContext 带上 UA/locale/timezone 与随机 viewport', async () => {
+      const page = createHappyPage();
+      const newContextMock = vi.fn<(options?: unknown) => Promise<BrowserContext>>(() =>
+        Promise.resolve({
+          ...fakeContext,
+          newPage: () => Promise.resolve(page),
+        } as unknown as BrowserContext)
+      );
+      mockedChromium().launch.mockResolvedValue({
+        ...fakeBrowser,
+        newContext: newContextMock,
+      } as unknown as Browser);
+
+      const result = await douyinProvider.sendReply(proxyReplyParams);
+      expect(result.success).toBe(true);
+      const contextArg = newContextMock.mock.calls[0][0] as {
+        userAgent: string;
+        locale: string;
+        timezoneId: string;
+        viewport: { width: number; height: number };
+      };
+      expect(contextArg.userAgent).toMatch(/Chrome\/1\d{2}\.0\.0\.0/);
+      expect(contextArg.locale).toBe('zh-CN');
+      expect(contextArg.timezoneId).toBe('Asia/Shanghai');
+      expect(contextArg.viewport.width).toBeGreaterThanOrEqual(1200);
+      expect(contextArg.viewport.width).toBeLessThanOrEqual(1440);
+      expect(contextArg.viewport.height).toBeGreaterThanOrEqual(720);
+      expect(contextArg.viewport.height).toBeLessThanOrEqual(900);
+    });
+
+    it('context 上注入反检测 init script', async () => {
+      const page = createHappyPage();
+      const addInitScriptMock = vi.fn(() => Promise.resolve());
+      mockedChromium().launch.mockResolvedValue({
+        ...fakeBrowser,
+        newContext: () =>
+          Promise.resolve({
+            ...fakeContext,
+            addInitScript: addInitScriptMock,
+            newPage: () => Promise.resolve(page),
+          } as unknown as BrowserContext),
+      } as unknown as Browser);
+
+      await douyinProvider.sendReply(proxyReplyParams);
+      expect(addInitScriptMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('有头模式共享 context 按 cookies+proxy 区分，proxy 变化会重启', async () => {
+      vi.stubEnv('SENDER_HEADLESS', 'false');
+      resetSharedState();
+      setupLaunchMock(createHappyPage());
+
+      const paramsWithProxy = (proxyUrl: string): SendReplyParams => ({
+        ...proxyReplyParams,
+        credentials: { ...proxyReplyParams.credentials, proxyUrl },
+      });
+
+      await douyinProvider.sendReply(paramsWithProxy('http://a:8080'));
+      await douyinProvider.sendReply(paramsWithProxy('http://a:8080'));
+      // 相同 cookies+proxy：复用同一个持久化 context，不重启
+      expect(mockedChromium().launchPersistentContext).toHaveBeenCalledTimes(1);
+      // 第二次启动必须带 proxy 选项
+      expect(mockedChromium().launchPersistentContext).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          proxy: { server: 'http://a:8080' },
+        })
+      );
+
+      await douyinProvider.sendReply(paramsWithProxy('http://b:9090'));
+      // proxy 变化：缓存 key 不同，重启浏览器避免串代理
+      expect(mockedChromium().launchPersistentContext).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -25,23 +25,33 @@
 
 ### 验证
 
+### 方案 A Phase 2：行为拟人化 + 代理（✅ 已完成并验证）
+
+- **拟人化** `src/lib/sender/humanize.ts`：`humanType`（逐字 pressSequentially，50-200ms/字符，5% 停顿）、`simulateHumanBrowsing`（随机滚动 2-5 次 + 鼠标移动 2-4 次）；douyin provider 打开页面后、找评论前调用，4 处 `fill` 全部替换。
+- **代理** `src/lib/sender/proxy.ts`：`parseProxyUrl`（http/socks5，认证 URL 解码）；三条启动路径（headless/persistent/fallback）均注入 proxy；共享 context 缓存 key 改为 cookies+proxy 双哈希（顺带修复了原代码复用时不校验 key 的串号隐患）。
+- **UA/指纹** `src/lib/sender/ua-pool.ts`：10 个 Chrome/Edge UA 池、随机 viewport（1200-1440×720-900）、locale zh-CN + timezone Asia/Shanghai、`applyStealthScripts`（隐藏 webdriver、补 window.chrome、languages、权限伪装）。
+- **队列** `src/lib/queue/index.ts`：`credentials.proxyUrl` 下传（有才加键）；安全窗口真正生效——`isSafeSendTime()` 为 false 时 `job.moveToDelayed(getNextSafeSendTime())` 推迟并 return，moveToDelayed 不可用/失败降级为立即发送（发送链路不崩）。窗口内 5-30 分钟抖动由入队 delay + Bull limiter 覆盖，不二次延迟。
+- **测试**：新增 `humanize.test.ts`/`proxy.test.ts`/`ua-pool.test.ts`（21 用例）、`src/lib/queue/process-send-job.test.ts`（6 用例，真实 DB + mock provider/compliance）；douyin.test.ts 新增 6 用例（proxy 注入、指纹选项、共享 context key），fake locator/page 补 pressSequentially/mouse/addInitScript，17 个既存用例零改动。
+
+### 验证
+
 - `npx tsc --noEmit`：通过 ✅
 - `npm run lint`：通过（0 error 0 warning）✅
-- `npm test`：**通过 ✅**（16 个文件 137 个用例全部通过，2026-07-24，迁移应用后）
+- `npm test`：**通过 ✅**（20 个文件 170 个用例全部通过，2026-07-24 串行复跑确认）
 - 环境：重启电脑后 WSL2/Docker 恢复，`docker compose up -d` 正常，主库与测试库迁移均已应用。
 
 ## 下次继续记录
 
 - **当前分支**：`main`
 - **最近三次提交**：
-  1. `175a184 feat: sender account pool with circuit breaker and compliance gating (Phase 1)`
-  2. `c5d0f79 docs: update WORK_LOG with Phase 1-3 completion and commits`
-  3. `6f2792c feat: integrate real index API for keyword scoring (Phase 3)`
-- **未提交改动**：账号管理 UI（`dashboard/accounts/page.tsx` + Navbar）+ 计划文档勾选（测试已通过，待提交）
+  1. `b7defea feat: sender account management UI at /dashboard/accounts (Phase 1 complete)`
+  2. `175a184 feat: sender account pool with circuit breaker and compliance gating (Phase 1)`
+  3. `c5d0f79 docs: update WORK_LOG with Phase 1-3 completion and commits`
+- **未提交改动**：Phase 2 全部改动（humanize/proxy/ua-pool/queue + 测试）+ 计划勾选（测试已通过，待提交）
 - **下一步**：
-  1. 提交账号管理 UI → **Phase 1 全部完成**
-  2. Phase 2：行为拟人化（`simulateHumanBrowsing`/`humanType`）+ 代理池 + UA/指纹伪装 + 安全时间窗口
-  3. Phase 3：监控告警 + 健康度看板
+  1. 提交 Phase 2
+  2. Phase 3：监控告警（钉钉/企业微信渠道）+ 账号健康度看板 + 失败率报表 + 一键暂停/恢复
+  3. 上线前遗留：`sender_accounts.cookies` 加密（`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`）；UA 池需随 Chrome 版本定期更新
 
 ## 开发命令
 
