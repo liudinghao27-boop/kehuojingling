@@ -11,6 +11,7 @@
 import { prisma } from '../db';
 import { Platform, AccountStatus, SenderAccount } from '@prisma/client';
 import { checkCompliance, generateCompliantVariant } from '../safety/compliance';
+import { sendAlert, buildAccountCoolingAlert } from '../monitor/alert';
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -165,6 +166,16 @@ export async function handleSendFailure(context: SendFailureContext): Promise<{
       userId: account.userId,
     },
   });
+
+  // 触发冷却时推送告警（sendAlert 内部已兜底，不会抛错）
+  if (shouldCooling) {
+    const alert = buildAccountCoolingAlert(
+      account.label,
+      account.platform,
+      `连续失败 ${newFailCount} 次，健康度降至 ${newScore}（最近错误：${error}）`
+    );
+    await sendAlert(account.userId, alert.title, alert.content);
+  }
 
   return { account: updated, shouldCooling, recoveryDelayMs };
 }

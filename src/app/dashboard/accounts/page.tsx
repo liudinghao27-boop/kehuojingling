@@ -37,6 +37,19 @@ import { getErrorMessage } from "@/lib/errors";
 type Platform = "DOUYIN" | "KUAISHOU" | "SHIPINHAO";
 type AccountStatus = "ACTIVE" | "COOLING" | "DISABLED" | "EXPIRED";
 
+interface SenderAccountStats {
+  total: number;
+  active: number;
+  cooling: number;
+  disabled: number;
+  expired: number;
+  avgHealthScore: number;
+  todaySent: number;
+  todayLimit: number;
+  todayFailed: number;
+  failureRate: number;
+}
+
 interface SenderAccount {
   id: string;
   platform: Platform;
@@ -106,6 +119,12 @@ export default function AccountsPage() {
   const [deleteTarget, setDeleteTarget] = useState<SenderAccount | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [stats, setStats] = useState<SenderAccountStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  const [bulkTarget, setBulkTarget] = useState<"pause" | "resume" | null>(null);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+
   const fetchAccounts = useCallback(async (platform: PlatformFilter) => {
     const url =
       platform === "ALL"
@@ -118,6 +137,40 @@ export default function AccountsPage() {
     }
     return (data.accounts || []) as SenderAccount[];
   }, []);
+
+  const fetchStats = useCallback(async (): Promise<SenderAccountStats> => {
+    const res = await fetch("/api/user/sender-accounts/stats");
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "获取账号统计失败");
+    }
+    return data.stats as SenderAccountStats;
+  }, []);
+
+  const refreshStats = useCallback(() => {
+    fetchStats()
+      .then(setStats)
+      .catch((error) => {
+        console.error("Fetch sender account stats error:", error);
+      });
+  }, [fetchStats]);
+
+  useEffect(() => {
+    let ignore = false;
+    fetchStats()
+      .then((s) => {
+        if (!ignore) setStats(s);
+      })
+      .catch((error) => {
+        if (!ignore) console.error("Fetch sender account stats error:", error);
+      })
+      .finally(() => {
+        if (!ignore) setStatsLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [fetchStats]);
 
   useEffect(() => {
     let ignore = false;
@@ -213,6 +266,7 @@ export default function AccountsPage() {
         setAccounts([data.account, ...accounts]);
         addToast("账号已添加", "success");
       }
+      refreshStats();
 
       setIsEditing(false);
       setEditForm({ ...EMPTY_FORM, platform: "DOUYIN" });
@@ -240,6 +294,7 @@ export default function AccountsPage() {
       setAccounts(accounts.filter((a) => a.id !== deleteTarget.id));
       addToast("账号已删除", "success");
       setDeleteTarget(null);
+      refreshStats();
     } catch (error) {
       addToast(getErrorMessage(error) || "删除失败", "error");
     } finally {
@@ -262,10 +317,69 @@ export default function AccountsPage() {
 
       setAccounts(accounts.map((a) => (a.id === account.id ? data.account : a)));
       addToast(successMsg, "success");
+      refreshStats();
     } catch (error) {
       addToast(getErrorMessage(error) || "操作失败", "error");
     }
   };
+
+  const confirmBulkStatus = async () => {
+    if (!bulkTarget) return;
+
+    setBulkUpdating(true);
+    try {
+      const res = await fetch("/api/user/sender-accounts/bulk-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: bulkTarget }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "操作失败");
+      }
+
+      addToast(
+        bulkTarget === "pause" ? `已暂停 ${data.updated} 个账号` : `已恢复 ${data.updated} 个账号`,
+        "success"
+      );
+      setBulkTarget(null);
+
+      const list = await fetchAccounts(platformFilter);
+      setAccounts(list);
+      refreshStats();
+    } catch (error) {
+      addToast(getErrorMessage(error) || "操作失败", "error");
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  const failureRatePercent = stats ? Math.round(stats.failureRate * 100) : 0;
+  const statCards: { label: string; value: string; valueClass: string }[] = stats
+    ? [
+        { label: "账号总数", value: String(stats.total), valueClass: "text-gray-900" },
+        { label: "正常", value: String(stats.active), valueClass: "text-green-600" },
+        { label: "冷却中", value: String(stats.cooling), valueClass: "text-yellow-600" },
+        { label: "已禁用", value: String(stats.disabled), valueClass: "text-gray-500" },
+        { label: "已过期", value: String(stats.expired), valueClass: "text-red-600" },
+        {
+          label: "平均健康度",
+          value: String(Math.round(stats.avgHealthScore)),
+          valueClass: healthScoreClass(stats.avgHealthScore),
+        },
+        {
+          label: "今日已发",
+          value: `${stats.todaySent}/${stats.todayLimit}`,
+          valueClass: "text-gray-900",
+        },
+        {
+          label: "今日失败率",
+          value: `${failureRatePercent}%`,
+          valueClass: stats.failureRate >= 0.3 ? "text-red-600" : "text-gray-900",
+        },
+      ]
+    : [];
 
   return (
     <div className="min-h-screen bg-white">
@@ -276,6 +390,49 @@ export default function AccountsPage() {
           <p className="mt-2 text-base text-gray-400">
             账号池用于自动回复/私信的多账号轮换，健康度过低的账号会自动冷却
           </p>
+        </div>
+
+        {/* Health Dashboard */}
+        <div className="mb-10">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-medium text-gray-900">健康度看板</h2>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setBulkTarget("pause")}
+                className="rounded-full px-5 py-2.5 h-auto text-sm"
+              >
+                全部暂停
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setBulkTarget("resume")}
+                className="rounded-full px-5 py-2.5 h-auto text-sm"
+              >
+                全部恢复
+              </Button>
+            </div>
+          </div>
+          {statsLoading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                <Skeleton key={i} className="h-24 rounded-2xl" />
+              ))}
+            </div>
+          ) : stats ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {statCards.map((card) => (
+                <Card key={card.label} className="rounded-2xl border-0 shadow-none bg-gray-50">
+                  <CardContent className="p-5">
+                    <p className="text-xs text-gray-400">{card.label}</p>
+                    <p className={`mt-1.5 text-2xl font-semibold ${card.valueClass}`}>
+                      {card.value}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {/* Platform Filter Tabs */}
@@ -548,6 +705,41 @@ export default function AccountsPage() {
               className="rounded-full px-6 py-2.5 h-auto text-sm"
             >
               {deleting ? "删除中..." : "确认删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Pause / Resume Confirmation Dialog */}
+      <Dialog open={!!bulkTarget} onOpenChange={(open) => !open && setBulkTarget(null)}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>{bulkTarget === "pause" ? "全部暂停" : "全部恢复"}</DialogTitle>
+            <DialogDescription>
+              {bulkTarget === "pause"
+                ? "将禁用所有正常状态的账号，停止自动回复/私信发送。确定继续吗？"
+                : "将把所有已禁用/冷却中的账号恢复为正常状态。确定继续吗？"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-3 sm:justify-end">
+            <Button
+              variant="secondary"
+              onClick={() => setBulkTarget(null)}
+              disabled={bulkUpdating}
+              className="rounded-full px-6 py-2.5 h-auto text-sm"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={confirmBulkStatus}
+              disabled={bulkUpdating}
+              className="rounded-full px-6 py-2.5 h-auto text-sm"
+            >
+              {bulkUpdating
+                ? "处理中..."
+                : bulkTarget === "pause"
+                  ? "确认暂停"
+                  : "确认恢复"}
             </Button>
           </DialogFooter>
         </DialogContent>

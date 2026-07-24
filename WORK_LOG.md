@@ -33,25 +33,33 @@
 - **队列** `src/lib/queue/index.ts`：`credentials.proxyUrl` 下传（有才加键）；安全窗口真正生效——`isSafeSendTime()` 为 false 时 `job.moveToDelayed(getNextSafeSendTime())` 推迟并 return，moveToDelayed 不可用/失败降级为立即发送（发送链路不崩）。窗口内 5-30 分钟抖动由入队 delay + Bull limiter 覆盖，不二次延迟。
 - **测试**：新增 `humanize.test.ts`/`proxy.test.ts`/`ua-pool.test.ts`（21 用例）、`src/lib/queue/process-send-job.test.ts`（6 用例，真实 DB + mock provider/compliance）；douyin.test.ts 新增 6 用例（proxy 注入、指纹选项、共享 context key），fake locator/page 补 pressSequentially/mouse/addInitScript，17 个既存用例零改动。
 
+### 方案 A Phase 3：监控告警 + 运营工具（✅ 已完成并验证）
+
+- **告警模块** `src/lib/monitor/alert.ts`：钉钉/企业微信 markdown webhook（10s 超时，失败只 warn 不抛错）；接入 `handleSendFailure` 冷却触发点自动推送。
+- **配置存储**：User 模型新增 `alertEnabled/alertChannelType/alertWebhook`，迁移 `20260724120016_add_user_alert_config`（开发库+测试库均已应用）。
+- **API**：`GET/PATCH /api/user/alert-config`、`POST /api/user/alert-config/test`、`GET /api/user/sender-accounts/stats`（10 字段；todaySent/todayFailed 口径为今日 replies+dms 的 SENT/FAILED 数，failureRate=失败/(成功+失败)）、`POST /api/user/sender-accounts/bulk-status`（pause: ACTIVE→DISABLED，resume: DISABLED→ACTIVE）。
+- **UI**：accounts 页顶部健康度看板（8 卡片 + 失败率 >=30% 红色警示）+「全部暂停/恢复」按钮（确认 Dialog，操作后刷新列表和看板）；settings 页「告警通知」区块（开关/渠道/Webhook/保存/发送测试）。
+- **测试**：新增 26 用例（alert 模块 7 + alert-config 路由 8 + stats 4 + bulk-status 5 + 既有适配），**24 个文件 196 用例全部通过**。
+
 ### 验证
 
 - `npx tsc --noEmit`：通过 ✅
 - `npm run lint`：通过（0 error 0 warning）✅
-- `npm test`：**通过 ✅**（20 个文件 170 个用例全部通过，2026-07-24 串行复跑确认）
+- `npm test`：**通过 ✅**（24 个文件 196 个用例全部通过，2026-07-24 串行复跑确认）
 - 环境：重启电脑后 WSL2/Docker 恢复，`docker compose up -d` 正常，主库与测试库迁移均已应用。
 
 ## 下次继续记录
 
 - **当前分支**：`main`
 - **最近三次提交**：
-  1. `b7defea feat: sender account management UI at /dashboard/accounts (Phase 1 complete)`
-  2. `175a184 feat: sender account pool with circuit breaker and compliance gating (Phase 1)`
-  3. `c5d0f79 docs: update WORK_LOG with Phase 1-3 completion and commits`
-- **未提交改动**：Phase 2 全部改动（humanize/proxy/ua-pool/queue + 测试）+ 计划勾选（测试已通过，待提交）
+  1. `b2dfe42 feat: humanized sending, proxy support, UA fingerprint, safe-window scheduling (Phase 2)`
+  2. `b7defea feat: sender account management UI at /dashboard/accounts (Phase 1 complete)`
+  3. `175a184 feat: sender account pool with circuit breaker and compliance gating (Phase 1)`
+- **未提交改动**：Phase 3 全部改动（alert 模块/迁移/API/看板 UI/设置区块 + 测试）+ 计划勾选（测试已通过，待提交）
 - **下一步**：
-  1. 提交 Phase 2
-  2. Phase 3：监控告警（钉钉/企业微信渠道）+ 账号健康度看板 + 失败率报表 + 一键暂停/恢复
-  3. 上线前遗留：`sender_accounts.cookies` 加密（`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`）；UA 池需随 Chrome 版本定期更新
+  1. 提交 Phase 3 → 方案 A Phase 1-3 全部完成
+  2. Phase 4（持续运营向）：Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动
+  3. 上线前遗留：`sender_accounts.cookies` 加密（`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`）；UA 池需随 Chrome 版本定期更新；队列积压/失败率主动告警（当前仅冷却触发）
 
 ## 开发命令
 

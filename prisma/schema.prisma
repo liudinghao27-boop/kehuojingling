@@ -16,6 +16,9 @@ model User {
   industryContext String? @db.Text // 业务场景描述，用于 AI 意向分析
   intentScoreThreshold Int @default(4) // 高意向阈值，1-5
   noiseRules    Json?     // 用户自定义噪音规则
+  alertEnabled  Boolean   @default(false) // 是否开启告警推送
+  alertChannelType String? // 告警渠道：dingtalk | wecom
+  alertWebhook  String?   @db.Text // 告警 Webhook 地址
   plan          Plan      @default(FREE)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

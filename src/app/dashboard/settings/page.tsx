@@ -9,6 +9,13 @@ import { Input } from "@/components/ui/input";
 import { CollapsibleCard } from "@/components/ui/collapsible-card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { User, Mail, Crown, Smartphone, Lock, Bookmark, Copy } from "lucide-react";
 import { getErrorMessage } from "@/lib/errors";
 import { DEFAULT_NOISE_RULES, type NoiseRules } from "@/lib/ai/noise";
@@ -31,6 +38,19 @@ const PLATFORM_DOMAINS: Record<"DOUYIN" | "KUAISHOU" | "SHIPINHAO", string> = {
   KUAISHOU: "www.kuaishou.com",
   SHIPINHAO: "channels.weixin.qq.com",
 };
+
+type AlertChannelType = "dingtalk" | "wecom";
+
+interface AlertConfig {
+  enabled: boolean;
+  channelType: AlertChannelType | null;
+  webhook: string | null;
+}
+
+const ALERT_CHANNEL_OPTIONS: { value: AlertChannelType; label: string }[] = [
+  { value: "dingtalk", label: "钉钉" },
+  { value: "wecom", label: "企业微信" },
+];
 
 function formatPlatformName(platform: string) {
   const option = PLATFORM_OPTIONS.find((p) => p.value === platform);
@@ -87,6 +107,14 @@ export default function SettingsPage() {
 
   const [noiseRules, setNoiseRules] = useState<NoiseRules>(DEFAULT_NOISE_RULES);
   const [noiseRulesSubmitting, setNoiseRulesSubmitting] = useState(false);
+
+  const [alertConfig, setAlertConfig] = useState<AlertConfig>({
+    enabled: false,
+    channelType: null,
+    webhook: null,
+  });
+  const [alertSaving, setAlertSaving] = useState(false);
+  const [alertTesting, setAlertTesting] = useState(false);
 
   const planLabel = session?.user?.plan === "FREE" ? "免费版" : session?.user?.plan;
   const phone = session?.user?.phone;
@@ -173,6 +201,15 @@ export default function SettingsPage() {
           console.error("Fetch bookmarklet token error:", err);
           addToast("请刷新页面重试", "error");
         }
+      });
+
+    fetch("/api/user/alert-config")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!ignore && data?.config) setAlertConfig(data.config);
+      })
+      .catch((err) => {
+        if (!ignore) console.error("Fetch alert config error:", err);
       });
 
     return () => {
@@ -378,6 +415,58 @@ export default function SettingsPage() {
       addToast(getErrorMessage(error) || "删除 AI Key 失败", "error");
     } finally {
       setAiKeySubmitting(false);
+    }
+  };
+
+  const handleSaveAlertConfig = async () => {
+    if (alertConfig.enabled) {
+      if (!alertConfig.channelType) {
+        addToast("请选择告警渠道", "error");
+        return;
+      }
+      if (!alertConfig.webhook?.trim()) {
+        addToast("请填写 Webhook URL", "error");
+        return;
+      }
+    }
+
+    setAlertSaving(true);
+    try {
+      const res = await fetch("/api/user/alert-config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: alertConfig.enabled,
+          channelType: alertConfig.channelType,
+          webhook: alertConfig.webhook?.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "保存失败");
+      }
+      if (data.config) setAlertConfig(data.config);
+      addToast("告警配置已保存", "success");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "保存告警配置失败", "error");
+    } finally {
+      setAlertSaving(false);
+    }
+  };
+
+  const handleTestAlert = async () => {
+    setAlertTesting(true);
+    try {
+      const res = await fetch("/api/user/alert-config/test", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "发送失败");
+      }
+      addToast("测试消息已发送，请查收", "success");
+    } catch (error) {
+      addToast(getErrorMessage(error) || "发送测试消息失败", "error");
+    } finally {
+      setAlertTesting(false);
     }
   };
 
@@ -867,6 +956,85 @@ export default function SettingsPage() {
               <p className="mt-6 text-xs text-gray-400">
                 你也可以在服务端环境变量中配置全局 OPENAI_API_KEY，作为未配置个人 Key 用户的兜底（当前未配置则不生效）。
               </p>
+          </CollapsibleCard>
+
+          {/* Alert Notification */}
+          <CollapsibleCard title="告警通知" defaultOpen={false}>
+              <p className="text-sm text-gray-500 mb-4">
+                当账号触发风控冷却时，系统会向下方配置的 Webhook 推送告警消息，支持钉钉 / 企业微信群机器人。
+              </p>
+              <div className="space-y-4 max-w-md">
+                <div className="flex items-center justify-between px-4 py-3 bg-white rounded-2xl">
+                  <span className="text-sm text-gray-700">启用告警</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={alertConfig.enabled}
+                    onClick={() => setAlertConfig({ ...alertConfig, enabled: !alertConfig.enabled })}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${
+                      alertConfig.enabled ? "bg-gray-900" : "bg-gray-200"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                        alertConfig.enabled ? "translate-x-5" : ""
+                      }`}
+                    />
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1.5">告警渠道</label>
+                  <Select
+                    value={alertConfig.channelType ?? ""}
+                    onValueChange={(value) =>
+                      setAlertConfig({ ...alertConfig, channelType: value as AlertChannelType })
+                    }
+                    disabled={!alertConfig.enabled}
+                  >
+                    <SelectTrigger className="w-full rounded-2xl bg-white border-0 px-4 py-3 h-auto text-sm focus:ring-2 focus:ring-gray-200">
+                      <SelectValue placeholder="选择渠道" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ALERT_CHANNEL_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1.5">Webhook URL</label>
+                  <Input
+                    type="text"
+                    placeholder="例如：https://oapi.dingtalk.com/robot/send?access_token=..."
+                    value={alertConfig.webhook ?? ""}
+                    onChange={(e) => setAlertConfig({ ...alertConfig, webhook: e.target.value })}
+                    disabled={!alertConfig.enabled}
+                    className="rounded-2xl bg-white border-0 px-4 py-3 h-auto text-sm focus:ring-2 focus:ring-gray-200"
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    onClick={handleSaveAlertConfig}
+                    disabled={alertSaving}
+                    className="rounded-full px-6 py-3 h-auto text-sm"
+                  >
+                    {alertSaving ? "保存中..." : "保存配置"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={handleTestAlert}
+                    disabled={alertTesting || !alertConfig.enabled}
+                    className="rounded-full px-6 py-3 h-auto text-sm"
+                  >
+                    {alertTesting ? "发送中..." : "发送测试"}
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-400">
+                  请先保存配置，再发送测试消息验证 Webhook 是否可用。
+                </p>
+              </div>
           </CollapsibleCard>
 
           {/* Platform Credentials */}

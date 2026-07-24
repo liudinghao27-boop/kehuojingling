@@ -474,10 +474,10 @@ async function sendAlert(rule: keyof typeof ALERT_RULES, context: Record<string,
 
 ### Phase 3：监控告警 + 运营工具（1 周）
 
-- [ ] 账号健康度看板
-- [ ] 告警渠道接入（钉钉/企业微信）
-- [ ] 失败率统计报表
-- [ ] 一键暂停/恢复所有账号
+- [x] 账号健康度看板（`/dashboard/accounts` 顶部 8 卡片：状态分布/平均健康度/今日额度/失败率，API `GET /api/user/sender-accounts/stats`）
+- [x] 告警渠道接入（钉钉/企业微信，`src/lib/monitor/alert.ts`，冷却触发自动推送，配置在设置页「告警通知」区块）
+- [x] 失败率统计报表（stats 中 failureRate，今日 FAILED/(SENT+FAILED)，>=30% 红色警示）
+- [x] 一键暂停/恢复所有账号（`POST /api/user/sender-accounts/bulk-status` + 看板按钮带确认 Dialog）
 
 ### Phase 4：规模化（持续）
 
