@@ -12,6 +12,7 @@ import { prisma } from '../db';
 import { Platform, AccountStatus, SenderAccount } from '@prisma/client';
 import { checkCompliance, generateCompliantVariant } from '../safety/compliance';
 import { sendAlert, buildAccountCoolingAlert } from '../monitor/alert';
+import { encrypt, decrypt } from '../encryption';
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -254,14 +255,34 @@ export interface CreateAccountInput {
   dailyLimit?: number;
 }
 
+/**
+ * 判断存储值是否为 AES-256-GCM 加密格式（iv:authTag:data，hex 三段）。
+ */
+function isEncryptedFormat(value: string): boolean {
+  const parts = value.split(':');
+  return parts.length === 3 && parts.every((p) => /^[0-9a-f]+$/i.test(p));
+}
+
+/**
+ * 读取账号 cookies：加密值解密后返回；历史明文数据原样返回（兼容未迁移的旧记录）。
+ */
+export function resolveAccountCookies(stored: string): string {
+  if (!isEncryptedFormat(stored)) return stored;
+  try {
+    return decrypt(stored);
+  } catch {
+    console.warn('[account-pool] cookies 解密失败，按明文兼容处理');
+    return stored;
+  }
+}
+
 export async function createAccount(input: CreateAccountInput): Promise<SenderAccount> {
-  // TODO: 加密 cookies（使用 PLATFORM_CREDENTIALS_ENCRYPTION_KEY）
   return prisma.senderAccount.create({
     data: {
       userId: input.userId,
       platform: input.platform,
       label: input.label,
-      cookies: input.cookies,
+      cookies: encrypt(input.cookies),
       proxyUrl: input.proxyUrl,
       dailyLimit: input.dailyLimit ?? 50,
     },
@@ -288,7 +309,11 @@ export async function updateAccount(
 ): Promise<SenderAccount> {
   return prisma.senderAccount.update({
     where: { id: accountId },
-    data,
+    data: {
+      ...data,
+      // cookies 更新时同步加密，避免明文落库
+      ...(data.cookies ? { cookies: encrypt(data.cookies) } : {}),
+    },
   });
 }
 

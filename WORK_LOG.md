@@ -2,7 +2,7 @@
 
 > 仅保留最近一次工作记录，每次保存自动覆盖。
 
-## 最后状态：2026-07-24
+## 最后状态：2026-08-12
 
 ## 本次完成
 
@@ -50,17 +50,19 @@
 
 ## 下次继续记录
 
-- **当前分支**：`main`，工作区干净，方案 A Phase 1-3 全部完成并已提交。
-- **最近三次提交**：
-  1. `c1d32f0 feat: alerting, health dashboard, bulk account controls (Phase 3)`
-  2. `b2dfe42 feat: humanized sending, proxy support, UA fingerprint, safe-window scheduling (Phase 2)`
-  3. `b7defea feat: sender account management UI at /dashboard/accounts (Phase 1 complete)`
-- **今日人工实测**：dev 环境已验证可启动（首页/账号管理/设置页 200，API 未登录 401）；功能实测由用户进行，结果待反馈。
+- **当前分支**：`main`。
+- **2026-08-12 商用试用了阻断项清理**：
+  1. ✅ `sender_accounts.cookies` 加密落库（AES-256-GCM，`createAccount`/`updateAccount` 写入加密，发送队列 `resolveAccountCookies` 解密并兼容历史明文）——上线前必须项已消除。
+  2. ✅ `.env.example` 补全：`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`、`SENDER_HEADLESS`、`SENDER_DEBUG`、`DOUYIN_COOKIES` 等。
+  3. ✅ 删除空 API 死目录（analyze/dm/stats/reply/send）。
+  4. ✅ 测试基线恢复：196/196 通过（本地 Docker 库 15s）；新增 `TEST_DATABASE_URL` 支持无 Docker 时用云端库跑测试（Neon 项目 `kehuojingling-test`，连接串在 gitignore 的 `.env.test`）；`testTimeout` 放宽至 30s。
+  5. ✅ `next build` 生产构建通过（44 页面，无错误无警告）。
 - **明天开工**：
-  1. 收集人工实测反馈，修复发现的问题
-  2. 上线前必须：`sender_accounts.cookies` 加密存储（`account-pool.ts` 留有 TODO，`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`）
-  3. 增强项（按需）：队列积压/失败率主动告警（当前仅冷却触发）；UA 池随 Chrome 版本更新
-  4. Phase 4（持续运营向）：Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动
+  1. 决策唯一部署路径：Render（推荐，支持 Redis + Playwright 长进程）vs Vercel（serverless，发送器/队列不适用）；`vercel.json` 与 `render.yaml` 需二选一
+  2. 生产环境必须配置 `PLATFORM_CREDENTIALS_ENCRYPTION_KEY`（openssl rand -base64 32）
+  3. 收集人工实测反馈，修复发现的问题
+  4. 增强项（按需）：队列积压/失败率主动告警；UA 池随 Chrome 版本更新
+  5. Phase 4（持续运营向）：Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动
 
 ## 开发命令
 

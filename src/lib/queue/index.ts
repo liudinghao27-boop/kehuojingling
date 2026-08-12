@@ -19,6 +19,7 @@ import {
   handleSendFailure,
   recoverCoolingAccounts,
   resetDailySentCounts,
+  resolveAccountCookies,
 } from '../sender/account-pool';
 import { checkCompliance, generateCompliantVariant, getNextSafeSendTime, isSafeSendTime } from '../safety/compliance';
 import { getSenderProvider } from '../sender';
@@ -275,7 +276,8 @@ export async function processSendJob(
     authorName: comment.authorName,
     commentContent: comment.content,
     credentials: {
-      cookies: account.cookies,
+      // cookies 入库时已加密（AES-256-GCM），发送前解密；历史明文数据由 resolveAccountCookies 兼容
+      cookies: resolveAccountCookies(account.cookies),
       // 账号配置了独立代理时下传给 provider，用于出口 IP 隔离；未配置则不加该键
       ...(account.proxyUrl ? { proxyUrl: account.proxyUrl } : {}),
     },

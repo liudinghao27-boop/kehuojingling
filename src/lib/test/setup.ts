@@ -1,7 +1,9 @@
 import { beforeAll, afterAll } from 'vitest';
 
 // 必须在任何模块加载前设置测试数据库，否则 src/lib/db 会缓存开发库连接。
+// 默认本地 Docker 测试库；无 Docker 时可通过 TEST_DATABASE_URL 指向云上独立测试库。
 process.env.DATABASE_URL =
+  process.env.TEST_DATABASE_URL ||
   'postgresql://kehuojingling:kehuojingling@localhost:5432/kehuojingling_test?schema=public';
 process.env.NEXTAUTH_SECRET = 'test-secret-do-not-use-in-production';
 process.env.AI_API_KEY_ENCRYPTION_KEY = 'test-key-32bytes-for-devx123';
