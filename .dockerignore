@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.github
+tmp
+tools
+logs
+backups
+.env*
+!.env.example
+*.log
+.vscode
+Dockerfile
+.dockerignore
+docker-compose.yml
