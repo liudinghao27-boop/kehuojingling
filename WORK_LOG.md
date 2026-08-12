@@ -57,9 +57,14 @@
   3. ✅ 删除空 API 死目录（analyze/dm/stats/reply/send）。
   4. ✅ 测试基线恢复：196/196 通过（本地 Docker 库 15s）；新增 `TEST_DATABASE_URL` 支持无 Docker 时用云端库跑测试（Neon 项目 `kehuojingling-test`，连接串在 gitignore 的 `.env.test`）；`testTimeout` 放宽至 30s。
   5. ✅ `next build` 生产构建通过（44 页面，无错误无警告）。
+- **2026-08-12 晚 部署路径定稿**：
+  1. ✅ 废弃 Vercel（`vercel.json` 已删），Render Blueprint 为唯一部署路径：`render.yaml` 含 web + redis(noeviction) + PG，启动自动 `migrate deploy`；密钥值在 DEPLOY.md「生产密钥」节
+  2. ✅ 生产模式实测通过：`next start` 下 注册→CSRF 登录→鉴权 API 200；创建发送账号 Cookie 密文落库直查验证（118 字符 iv:tag:data）
+  3. ⚠️ 实测发现并修复：`.env` 缺 `PLATFORM_CREDENTIALS_ENCRYPTION_KEY` 导致生产模式创建账号 500（已补）
+  4. ✅ 代码已推送 GitHub main（d0455ef），可直接在 Render 创建 Blueprint
 - **明天开工**：
-  1. 决策唯一部署路径：Render（推荐，支持 Redis + Playwright 长进程）vs Vercel（serverless，发送器/队列不适用）；`vercel.json` 与 `render.yaml` 需二选一
-  2. 生产环境必须配置 `PLATFORM_CREDENTIALS_ENCRYPTION_KEY`（openssl rand -base64 32）
+  1. Render 创建 Blueprint（选本仓库），按 DEPLOY.md 填 sync:false 变量
+  2. 抓取服务内网穿透后填 `SCRAPER_API_URL`；试用初期 `SENDER_PROVIDER=mock`
   3. 收集人工实测反馈，修复发现的问题
   4. 增强项（按需）：队列积压/失败率主动告警；UA 池随 Chrome 版本更新
   5. Phase 4（持续运营向）：Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动
