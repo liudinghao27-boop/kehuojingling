@@ -44,7 +44,11 @@ AI_API_KEY_ENCRYPTION_KEY=14sC6TU8v1KCZ34wJP9WhP5VsDWn0wvbWXkbiH2ttLo=
 
 以下两个组件不适合放在 Render，试用期间采用「云端 Web + 本地工作机」混合模式：
 
-- **抓取服务**（Python，Evil0ctal/Douyin_TikTok_Download_API）：在本机运行 `npm run dev:scraper`，用内网穿透（如 cloudflared / ngrok）暴露后，将公网地址填入 Render 的 `SCRAPER_API_URL`。
+- **抓取服务**（Python，Evil0ctal/Douyin_TikTok_Download_API）：在本机运行 `npm run dev:scraper`，用内网穿透暴露后，将公网地址填入 Render 的 `SCRAPER_API_URL`（填裸域名即可，代理自动拼接路径）。
+  - 2026-08-12 当前隧道（localhost.run，SSH 方式，绕开 VPN 对 cloudflared 的 TLS 拦截）：
+    `https://02b72ec76c55cb.lhr.life`
+  - 重启隧道命令（机器重启后需重跑，域名会变化，需同步更新 Render 变量）：
+    `ssh -R 80:localhost:8000 nokey@localhost.run`
 - **发送器**（Playwright 有头浏览器，需人工完成抖音登录/短信验证）：在有浏览器的机器上运行，Cookie 通过 Dashboard → 账号管理录入，云端队列消费时下发。
 
 ## 四、本地开发
