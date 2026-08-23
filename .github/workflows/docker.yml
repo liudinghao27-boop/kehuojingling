@@ -29,7 +29,7 @@ jobs:
           npx prisma generate
           set -o pipefail
           npm run build 2>&1 | tee build.log || {
-            tail -c 2500 build.log | sed 's/%/%25/g' | while IFS= read -r line; do echo "::error::$line"; done
+            grep -E "Can't resolve|Module not found|error TS|Failed to compile" build.log | head -40 | sed 's/%/%25/g' | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           }
 
