@@ -17,6 +17,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 诊断：先在 runner (glibc) 上直接构建，失败时把日志尾部写入注解（公开 API 可见）
+      - name: Diagnose build on runner
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Runner build probe
+        run: |
+          npm ci
+          npx prisma generate
+          set -o pipefail
+          npm run build 2>&1 | tee build.log || {
+            tail -c 2500 build.log | sed 's/%/%25/g' | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
