@@ -9,7 +9,8 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 COPY . .
-RUN npx prisma generate && npm run build
+RUN npx prisma generate
+RUN npm run build
 # 构建完成后裁剪为生产依赖（保留已生成的 Prisma Client）
 RUN npm prune --omit=dev
 
