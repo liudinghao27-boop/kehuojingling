@@ -51,3 +51,6 @@ next-env.d.ts
 # local tools (cloudflared etc.)
 /tools/
 tmp/
+
+# local deploy secrets
+deploy-secrets.local.md

@@ -1,60 +1,83 @@
-# 获客精灵 - Render 部署指南（唯一部署路径）
+# 获客精灵 - Sealos 部署指南（唯一部署路径）
 
-> 2026-08-12 起 Vercel 方案已废弃（`vercel.json` 已删除）。原因：Bull 队列、Playwright 发送器、定时维护任务均为长驻有状态负载，serverless 模型不适用。
+> 2026-08-23 起 Render 方案废弃（`render.yaml` 已删除），生产环境迁移至 Sealos 杭州区。
+> 密码、密钥等敏感值全部保存在本地 `deploy-secrets.local.md`（已 gitignore，不进仓库）。
 
-## 一、一键部署（Blueprint）
+## 一、当前生产环境（已上线）
 
-1. 打开 https://dashboard.render.com → **New** → **Blueprint**
-2. 选择仓库 `liudinghao27-boop/kehuojingling`
-3. Render 读取根目录 `render.yaml`，自动创建：
-   - Web Service（Next.js，启动时自动执行 `prisma migrate deploy`）
-   - Redis（Bull 队列，`noeviction`）
-   - PostgreSQL（free 1GB）
-4. 应用 Blueprint 时 / 之后，在 Web Service 的 Environment 中填入以下 `sync: false` 变量：
+- **公网地址**：https://ejahosctpwsb.sealoshzh.site
+- **平台**：Sealos 杭州区 https://hzh.sealos.run ，账号命名空间 `ns-qx3gkyoi`（GitHub 账号 liudinghao27-boop 登录；8 月 13 日的旧账号 ns-23ctphuq 已弃用）
+- **应用**：应用管理（App Launchpad）→ `kehuojingling`，0.2C / 512M / 固定 1 实例，端口 3000，公网已开
+- **镜像**：`ghcr.io/liudinghao27-boop/kehuojingling:latest`（GHCR 公开包，push 到 main 后 GitHub Actions 自动构建）
+- **数据库**：数据库应用 → `kehuojingling`（PostgreSQL 16，0.5C/512Mi/3Gi）
+- **队列**：数据库应用 → `kehuojingling-redis`（Redis 7，0.6C/612Mi/4Gi）
+- 连接串与密钥：见 `deploy-secrets.local.md`
 
-| 变量 | 值 |
-|------|-----|
-| `PLATFORM_CREDENTIALS_ENCRYPTION_KEY` | 见下方「生产密钥」（32 字节 base64，Cookie/凭证加密，**不填生产环境会启动报错**） |
-| `AI_API_KEY_ENCRYPTION_KEY` | 见下方「生产密钥」 |
-| `NEXTAUTH_SECRET` | Blueprint 自动生成，也可换成下方值 |
-| `OPENAI_API_KEY` | DeepSeek key（不填则 AI 分析回退本地规则） |
-| `OPENAI_BASE_URL` | `https://api.deepseek.com/v1` |
-| `OPENAI_MODEL` | `deepseek-v4-flash` |
-| `SCRAPER_API_URL` | 抓取服务公网地址（见「三」） |
-| `SENDER_PROVIDER` | 试用初期建议 `mock`（只记录不真发）；真实发送用 `real` 或留空 |
+## 二、日常更新流程（改代码后上线）
 
-### 生产密钥（2026-08-12 生成，仅此处与 Render Dashboard 保存）
+1. `git push` 到 main（本机推送需 `git -c http.sslBackend=openssl push`）
+2. 等 GitHub Actions 构建镜像成功（约 5 分钟）
+3. Sealos → 应用管理 → `kehuojingling` → **重启**（latest 标签需重启才会拉新镜像）
 
-```
-NEXTAUTH_SECRET=/4NCds1KqPnPTectufFqliUgCpAUt9Hxkdpe2rN2JFE=
-PLATFORM_CREDENTIALS_ENCRYPTION_KEY=jPm8bxnKfhGEIygdfnvEAhLUpweS069ya0Tya4y0WU0=
-AI_API_KEY_ENCRYPTION_KEY=14sC6TU8v1KCZ34wJP9WhP5VsDWn0wvbWXkbiH2ttLo=
-```
+## 三、环境变量（应用管理 → kehuojingling → 编辑）
 
-> 重新生成命令：`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`。
-> 注意：更换 `*_ENCRYPTION_KEY` 会导致已加密数据无法解密，请勿在已有数据后轮换。
+| 变量 | 说明 |
+|------|------|
+| `DATABASE_URL` | PG **内网**连接串（见 secrets 文件） |
+| `REDIS_URL` | Redis **内网**连接串（见 secrets 文件） |
+| `NEXTAUTH_SECRET` | 见 secrets 文件 |
+| `NEXTAUTH_URL` | `https://ejahosctpwsb.sealoshzh.site` |
+| `PLATFORM_CREDENTIALS_ENCRYPTION_KEY` | 见 secrets 文件（更换后已加密数据无法解密，勿轮换） |
+| `AI_API_KEY_ENCRYPTION_KEY` | 见 secrets 文件 |
+| `SENDER_PROVIDER` | 试用初期 `mock`（只记录不真发）；真实发送改 `real` |
+| `SCRAPER_API_URL` | 抓取服务隧道域名（见「四」，隧道重启后需更新并重启应用） |
 
-## 二、验证部署
+改环境变量保存后应用会自动重建部署。
 
-- 访问 `https://kehuojingling.onrender.com/login`，注册账号并登录
-- Dashboard 各页面可打开；设置页可保存 AI key
-- 免费限制：15 分钟无访问休眠（首访约 30 秒唤醒）；免费 PG 90 天闲置删除
+## 四、抓取服务与发送器（混合模式）
 
-## 三、抓取服务与发送器（混合模式）
+Playwright 发送器和 Python 爬虫留在本机，云端通过内网穿透调用爬虫：
 
-以下两个组件不适合放在 Render，试用期间采用「云端 Web + 本地工作机」混合模式：
+- **启动爬虫**（本机窗口 1，保持开着）：
+  ```
+  cd E:\ai\YJ-HUOKE
+  node scripts/start-scraper.js
+  ```
+  （爬虫本体在 `E:/ai/Douyin_TikTok_Download_API`，用其 `.venv` 里的 Python，监听 8000 端口）
+- **启动隧道**（本机窗口 2，保持开着）：
+  ```
+  ssh -R 80:localhost:8000 nokey@localhost.run
+  ```
+  首次连接输入 `yes`。启动后屏幕会显示 `https://xxxxxxxx.lhr.life` 域名。
+- **每次隧道重启域名都会变**：拿到新域名后更新应用的 `SCRAPER_API_URL` 环境变量并重启应用。
+- **发送器**：试用初期 `SENDER_PROVIDER=mock`；真实发送时在有浏览器的机器上运行 Playwright，Cookie 通过 Dashboard → 账号管理录入。
 
-- **抓取服务**（Python，Evil0ctal/Douyin_TikTok_Download_API）：在本机运行 `npm run dev:scraper`，用内网穿透暴露后，将公网地址填入 Render 的 `SCRAPER_API_URL`（填裸域名即可，代理自动拼接路径）。
-  - 2026-08-12 当前隧道（localhost.run，SSH 方式，绕开 VPN 对 cloudflared 的 TLS 拦截）：
-    `https://02b72ec76c55cb.lhr.life`
-  - 重启隧道命令（机器重启后需重跑，域名会变化，需同步更新 Render 变量）：
-    `ssh -R 80:localhost:8000 nokey@localhost.run`
-- **发送器**（Playwright 有头浏览器，需人工完成抖音登录/短信验证）：在有浏览器的机器上运行，Cookie 通过 Dashboard → 账号管理录入，云端队列消费时下发。
+## 五、数据库维护（本机执行）
 
-## 四、本地开发
+- PG 已开外网访问（¥0.014/小时），外网连接串见 secrets 文件
+- 跑迁移：`DATABASE_URL="<PG外网连接串>" npx prisma migrate deploy`
+- 已知坑：kubeblocks 自带 cron 等表会导致 `P3005`，需先手工建空的 `_prisma_migrations` 表（标准 8 列）再 `migrate deploy`
+- 不用时可关闭 PG 外网访问省钱（应用走内网不受影响）
+
+## 六、费用估算（余额敏感）
+
+| 项目 | 费用 |
+|------|------|
+| 应用 0.2C/512M | ≈ ¥0.30/天 |
+| PG 0.5C/512Mi/3Gi | ≈ ¥0.56/天 |
+| Redis 0.6C/612Mi/4Gi | ≈ ¥0.66/天 |
+| PG 外网访问 | ≈ ¥0.34/天（可关） |
+| **合计** | **≈ ¥1.9/天** |
+
+## 七、本地开发
 
 ```bash
-docker compose up -d      # PG + Redis
-npm run dev:all           # Next.js + 抓取服务
-npm test                  # 196 个用例；无 Docker 时 TEST_DATABASE_URL 可指向云端测试库
+npm run dev:all    # Next.js + 抓取服务（本机内存小，不要启 Docker Desktop）
+npm test           # 测试；TEST_DATABASE_URL 可指向云端测试库
 ```
+
+> ⚠️ 本机启 Docker Desktop 会导致系统卡死重启，本地开发数据库请用 `TEST_DATABASE_URL` 指向云端测试库。
+
+## 八、安全提醒
+
+- 仓库当前为 **public**，早期 DEPLOY.md 中的密钥已进入 git 历史，建议尽快把仓库设为 private，并在方便时轮换 `NEXTAUTH_SECRET` 与两个加密 key（轮换加密 key 前需先清空已加密的账号 Cookie 数据）。

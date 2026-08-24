@@ -69,6 +69,16 @@
   4. 增强项（按需）：队列积压/失败率主动告警；UA 池随 Chrome 版本更新
   5. Phase 4（持续运营向）：Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动
 
+- **2026-08-23/24 部署迁移 Sealos（已上线）**：
+  1. ✅ Render 方案废弃（需绑卡失败），迁移 Sealos 杭州区；账号迁移至新号 `ns-qx3gkyoi`（GitHub 登录），旧号 ns-23ctphuq 资源弃用
+  2. ✅ 修复镜像构建：git 跟踪的 4 个 UI 组件文件名大写（Badge/Button/Card/Input.tsx）与 import 小写不一致，Windows 不报错、Linux module-not-found → `git mv` 改小写（cb125d7）；Dockerfile 基座 alpine → node:24-slim
+  3. ✅ 镜像 `ghcr.io/liudinghao27-boop/kehuojingling:latest` 构建成功且 GHCR 包设为 public；workflow 加 Runner build probe（失败原因写入 check-run annotation，公开 API 可查，绕开「看日志需登录」）
+  4. ✅ PG（postgresql-16.4.0）+ Redis（7.2.7）重建，迁移 8/8 成功（坑：kubeblocks 自带 cron 表导致 P3005，需先手工建空 `_prisma_migrations` 表）
+  5. ✅ 应用 App Launchpad 部署运行中，0.2C/512M/1 实例，公网 `https://ejahosctpwsb.sealoshzh.site`
+  6. ✅ 云端实测通过：注册 → CSRF 登录 → 会话有效；10 个核心页面 200（/dashboard/keywords 无此路由，404 正常）；/api/videos、/api/templates?type=reply、/api/user/sender-accounts、/api/ai/history 均正常返回；资料接口 PATCH /api/user/profile 正常
+  7. ✅ 文档更新：DEPLOY.md 重写为 Sealos 方案；敏感连接串/密钥移入 gitignore 的 `deploy-secrets.local.md`（仓库为 public，旧密钥已在 git 历史中，建议仓库转 private）
+  8. ⏳ 待办：本机爬虫 + localhost.run 隧道重启后回填 `SCRAPER_API_URL`；费用 ≈¥1.9/天，PG 外网不用可关
+
 ## 开发命令
 
 ```bash
