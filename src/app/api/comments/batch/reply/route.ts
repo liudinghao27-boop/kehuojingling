@@ -192,6 +192,8 @@ export async function POST(req: NextRequest) {
         }
         replyContent = candidate;
         mode = 'seed';
+        // 生成内容一经确定即计入批内查重（即使后续发送失败），保证同批不撞车
+        batchGenerated.push(candidate);
       } else {
         replyContent = sharedContent!;
       }
@@ -221,7 +223,6 @@ export async function POST(req: NextRequest) {
         successCount++;
         consecutiveFailures = 0;
         sentCommentIds.push(comment.id);
-        batchGenerated.push(replyContent);
         await prisma.reply.update({
           where: { id: reply.id },
           data: { status: 'SENT', sentAt: now },
