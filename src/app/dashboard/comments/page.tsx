@@ -132,6 +132,10 @@ function CommentsContent() {
   const [messageContent, setMessageContent] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+  // 种草模式：AI 生成观点性回复（每条差异化，防风控）
+  const [seedMode, setSeedMode] = useState(false);
+  // 语义查重拦截信息（409 时展示，可强制发送）
+  const [dedupWarning, setDedupWarning] = useState<{ error: string; suggestion?: string } | null>(null);
 
   interface FetchCommentsResult {
     comments: Comment[];
@@ -273,11 +277,25 @@ function CommentsContent() {
   const openDialog = (comment: Comment, type: "reply" | "dm") => {
     setActiveComment(comment);
     setDialogType(type);
+    setSeedMode(false);
+    setDedupWarning(null);
     const defaultTemplate = (type === "reply" ? replyTemplates : dmTemplates).find(
       (t) => t.isDefault
     );
     setSelectedTemplateId(defaultTemplate?.id || "");
     setMessageContent(defaultTemplate?.content || "");
+    setDialogOpen(true);
+  };
+
+  /** 种草回复：AI 生成观点性评论，一键差异化发送 */
+  const openSeedDialog = (comment: Comment) => {
+    setActiveComment(comment);
+    setDialogType("reply");
+    setBatchMode(false);
+    setSeedMode(true);
+    setDedupWarning(null);
+    setSelectedTemplateId("");
+    setMessageContent("");
     setDialogOpen(true);
   };
 
@@ -305,6 +323,8 @@ function CommentsContent() {
     setBatchMode(true);
     setDialogType(type);
     setActiveComment(null);
+    setSeedMode(false);
+    setDedupWarning(null);
     const defaultTemplate = (type === "reply" ? replyTemplates : dmTemplates).find(
       (t) => t.isDefault
     );
@@ -313,8 +333,20 @@ function CommentsContent() {
     setDialogOpen(true);
   };
 
-  const handleSubmit = async () => {
-    if (!messageContent.trim()) {
+  /** 批量种草：每条评论独立生成差异化观点回复 */
+  const openBatchSeedDialog = () => {
+    setBatchMode(true);
+    setDialogType("reply");
+    setActiveComment(null);
+    setSeedMode(true);
+    setDedupWarning(null);
+    setSelectedTemplateId("");
+    setMessageContent("");
+    setDialogOpen(true);
+  };
+
+  const handleSubmit = async (force = false) => {
+    if (!seedMode && !messageContent.trim()) {
       addToast("请输入内容", "error");
       return;
     }
@@ -330,6 +362,7 @@ function CommentsContent() {
     }
 
     setSubmitting(true);
+    setDedupWarning(null);
     try {
       const url = batchMode
         ? `/api/comments/batch/${dialogType}`
@@ -337,12 +370,16 @@ function CommentsContent() {
       const body = batchMode
         ? JSON.stringify({
             commentIds: Array.from(selectedIds),
-            content: messageContent,
-            templateId: selectedTemplateId || undefined,
+            ...(seedMode
+              ? { generate: true }
+              : { content: messageContent, templateId: selectedTemplateId || undefined }),
+            ...(force ? { force: true } : {}),
           })
         : JSON.stringify({
-            content: messageContent,
-            templateId: selectedTemplateId || undefined,
+            ...(seedMode
+              ? { generate: true }
+              : { content: messageContent, templateId: selectedTemplateId || undefined }),
+            ...(force ? { force: true } : {}),
           });
 
       const res = await fetch(url, {
@@ -353,6 +390,11 @@ function CommentsContent() {
 
       const data = await res.json();
       if (!res.ok) {
+        // 语义查重/同质化拦截：展示警告，允许用户强制发送
+        if (res.status === 409 && data.code) {
+          setDedupWarning({ error: data.error, suggestion: data.suggestion });
+          return;
+        }
         throw new Error(data.error || "操作失败");
       }
 
@@ -360,7 +402,9 @@ function CommentsContent() {
         const successCount = data.count || 0;
         const failedCount = data.failed || 0;
         addToast(
-          `${dialogType === "reply" ? "回复" : "私信"}了 ${successCount} 位用户${failedCount > 0 ? `，${failedCount} 位失败` : ""}`,
+          seedMode
+            ? `种草回复了 ${successCount} 位用户（每条内容均不同）${failedCount > 0 ? `，${failedCount} 位失败` : ""}`
+            : `${dialogType === "reply" ? "回复" : "私信"}了 ${successCount} 位用户${failedCount > 0 ? `，${failedCount} 位失败` : ""}`,
           failedCount > 0 ? "error" : "success"
         );
         setSelectedIds(new Set());
@@ -370,13 +414,16 @@ function CommentsContent() {
         addToast(
           isFailed
             ? (data.error || `${dialogType === "reply" ? "回复" : "私信"}发送失败`)
-            : (dialogType === "reply" ? "回复已发送" : "私信已发送"),
+            : seedMode
+              ? "种草回复已发送（内容见展开记录）"
+              : (dialogType === "reply" ? "回复已发送" : "私信已发送"),
           isFailed ? "error" : "success"
         );
       }
 
       await fetchData();
       setDialogOpen(false);
+      setSeedMode(false);
     } catch (error) {
       addToast(getErrorMessage(error) || "操作失败", "error");
     } finally {
@@ -480,6 +527,13 @@ function CommentsContent() {
                     className="rounded-full px-4 py-2 h-auto text-xs text-gray-500"
                   >
                     全选本页
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={openBatchSeedDialog}
+                    className="rounded-full px-4 py-2 h-auto text-xs bg-green-600 hover:bg-green-700"
+                  >
+                    批量种草
                   </Button>
                   <Button
                     size="sm"
@@ -602,6 +656,13 @@ function CommentsContent() {
                                 </Button>
                               ) : comment.status === "NEW" || comment.status === "ANALYZED" ? (
                                 <>
+                                  <Button
+                                    onClick={() => openSeedDialog(comment)}
+                                    variant="secondary"
+                                    className="rounded-full px-4 py-2 h-auto text-sm text-green-700 bg-green-50 hover:bg-green-100"
+                                  >
+                                    种草
+                                  </Button>
                                   <Button
                                     onClick={() => openDialog(comment, "reply")}
                                     className="rounded-full px-4 py-2 h-auto text-sm"
@@ -728,41 +789,69 @@ function CommentsContent() {
         <DialogContent className="sm:max-w-lg rounded-3xl">
           <DialogHeader>
             <DialogTitle>
-              {batchMode
-                ? `批量${dialogType === "reply" ? "回复" : "私信"}（${selectedIds.size} 条）`
-                : dialogType === "reply"
-                  ? "回复评论"
-                  : "发送私信"}
+              {seedMode
+                ? batchMode
+                  ? `批量种草回复（${selectedIds.size} 条）`
+                  : "种草回复"
+                : batchMode
+                  ? `批量${dialogType === "reply" ? "回复" : "私信"}（${selectedIds.size} 条）`
+                  : dialogType === "reply"
+                    ? "回复评论"
+                    : "发送私信"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-5 pt-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-500 mb-2">选择话术模板</label>
-              <select
-                value={selectedTemplateId}
-                onChange={(e) => handleTemplateChange(e.target.value)}
-                className="w-full rounded-2xl bg-gray-50 border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200"
-              >
-                <option value="">自定义内容</option>
-                {currentTemplates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.name} {template.isDefault ? "（默认）" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-500 mb-2">
-                {dialogType === "reply" ? "回复内容" : "私信内容"}
-              </label>
-              <Textarea
-                rows={4}
-                value={messageContent}
-                onChange={(e) => setMessageContent(e.target.value)}
-                placeholder={dialogType === "reply" ? "输入回复内容..." : "输入私信内容..."}
-                className="rounded-2xl bg-gray-50 border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200 resize-none"
-              />
-            </div>
+            {seedMode ? (
+              <div className="rounded-2xl bg-green-50 px-4 py-4 text-sm text-green-800 space-y-2">
+                <p className="font-medium">观点种草模式（防风控）</p>
+                <p className="text-green-700">
+                  AI 将针对{batchMode ? "每条评论" : "这条评论"}生成<strong>互不相同的观点性回复</strong>：
+                  不留联系方式、不硬广，用专业人设吸引对方主动看你主页。
+                  {batchMode && " 生成需要一些时间，请耐心等待。"}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-2">选择话术模板</label>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(e) => handleTemplateChange(e.target.value)}
+                    className="w-full rounded-2xl bg-gray-50 border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200"
+                  >
+                    <option value="">自定义内容</option>
+                    {currentTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name} {template.isDefault ? "（默认）" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-2">
+                    {dialogType === "reply" ? "回复内容" : "私信内容"}
+                  </label>
+                  <Textarea
+                    rows={4}
+                    value={messageContent}
+                    onChange={(e) => setMessageContent(e.target.value)}
+                    placeholder={dialogType === "reply" ? "输入回复内容..." : "输入私信内容..."}
+                    className="rounded-2xl bg-gray-50 border-0 px-4 py-3 text-gray-900 text-sm focus:ring-2 focus:ring-gray-200 resize-none"
+                  />
+                </div>
+              </>
+            )}
+
+            {dedupWarning && (
+              <div className="rounded-2xl bg-amber-50 px-4 py-4 text-sm space-y-1">
+                <p className="font-medium text-amber-800">风控提醒</p>
+                <p className="text-amber-700">{dedupWarning.error}</p>
+                {dedupWarning.suggestion && (
+                  <p className="text-amber-600 text-xs">{dedupWarning.suggestion}</p>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3 justify-end">
               <Button
                 variant="secondary"
@@ -772,12 +861,27 @@ function CommentsContent() {
               >
                 取消
               </Button>
+              {dedupWarning && !seedMode && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setDedupWarning(null);
+                    handleSubmit(true);
+                  }}
+                  disabled={submitting}
+                  className="rounded-full px-6 py-2.5 h-auto text-sm text-amber-700"
+                >
+                  仍要发送
+                </Button>
+              )}
               <Button
-                onClick={handleSubmit}
-                disabled={submitting || !messageContent.trim()}
-                className="rounded-full px-6 py-2.5 h-auto text-sm"
+                onClick={() => handleSubmit(false)}
+                disabled={submitting || (!seedMode && !messageContent.trim())}
+                className={seedMode ? "rounded-full px-6 py-2.5 h-auto text-sm bg-green-600 hover:bg-green-700" : "rounded-full px-6 py-2.5 h-auto text-sm"}
               >
-                {submitting ? "发送中..." : "发送"}
+                {submitting
+                  ? (seedMode ? "生成并发送中..." : "发送中...")
+                  : (seedMode ? "生成并发送" : "发送")}
               </Button>
             </div>
           </div>
