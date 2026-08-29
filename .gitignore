@@ -54,3 +54,6 @@ tmp/
 
 # local deploy secrets
 deploy-secrets.local.md
+
+# scraper cloud source (separate repo: kehuojingling-scraper)
+/scraper-cloud/
