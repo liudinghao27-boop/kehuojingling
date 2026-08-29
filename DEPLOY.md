@@ -10,8 +10,11 @@
 - **应用**：应用管理（App Launchpad）→ `kehuojingling`，0.2C / 512M / 固定 1 实例，端口 3000，公网已开
 - **镜像**：`ghcr.io/liudinghao27-boop/kehuojingling:latest`（GHCR 公开包，push 到 main 后 GitHub Actions 自动构建）
 - **数据库**：数据库应用 → `kehuojingling`（PostgreSQL 16，0.5C/512Mi/3Gi）
-- **队列**：数据库应用 → `kehuojingling-redis`（Redis 7，0.6C/612Mi/4Gi）
+- **队列**：数据库应用 → `kehuojingling-redis`（Redis 7）
+- **爬虫**：应用管理 → `kehuojingling-scraper`（云端常驻，**仅内网**不开公网；镜像 `ghcr.io/liudinghao27-boop/kehuojingling-scraper:latest`，源码在公开仓库 `liudinghao27-boop/kehuojingling-scraper`，push main 自动构建）
 - 连接串与密钥：见 `deploy-secrets.local.md`
+
+> 经验：Sealos 的 kubeconfig 会过期。API 报 `NOT_FOUND` / `unable to verify the first certificate` / 列表为空时，先在浏览器打开 Sealos 桌面，从 `localStorage.session` 取新 kubeconfig 再下结论。
 
 ## 二、日常更新流程（改代码后上线）
 
@@ -34,22 +37,9 @@
 
 改环境变量保存后应用会自动重建部署。
 
-## 四、抓取服务与发送器（混合模式）
+## 四、抓取服务与发送器
 
-Playwright 发送器和 Python 爬虫留在本机，云端通过内网穿透调用爬虫：
-
-- **启动爬虫**（本机窗口 1，保持开着）：
-  ```
-  cd E:\ai\YJ-HUOKE
-  node scripts/start-scraper.js
-  ```
-  （爬虫本体在 `E:/ai/Douyin_TikTok_Download_API`，用其 `.venv` 里的 Python，监听 8000 端口）
-- **启动隧道**（本机窗口 2，保持开着）：
-  ```
-  ssh -R 80:localhost:8000 nokey@localhost.run
-  ```
-  首次连接输入 `yes`。启动后屏幕会显示 `https://xxxxxxxx.lhr.life` 域名。
-- **每次隧道重启域名都会变**：拿到新域名后更新应用的 `SCRAPER_API_URL` 环境变量并重启应用。
+- **抓取服务**：已云端化（`kehuojingling-scraper` 应用，内网直连主应用，无需隧道、无需本机窗口）。更新爬虫代码：push 到 `kehuojingling-scraper` 仓库 main → 等镜像构建 → Sealos 重启该应用。
 - **发送器**：试用初期 `SENDER_PROVIDER=mock`；真实发送时在有浏览器的机器上运行 Playwright，Cookie 通过 Dashboard → 账号管理录入。
 
 ## 五、数据库维护（本机执行）
@@ -64,10 +54,11 @@ Playwright 发送器和 Python 爬虫留在本机，云端通过内网穿透调�
 | 项目 | 费用 |
 |------|------|
 | 应用 0.2C/512M | ≈ ¥0.30/天 |
+| 爬虫 0.5C/1G | ≈ ¥0.90/天 |
 | PG 0.5C/512Mi/3Gi | ≈ ¥0.56/天 |
-| Redis 0.6C/612Mi/4Gi | ≈ ¥0.66/天 |
+| Redis | ≈ ¥0.66/天 |
 | PG 外网访问 | ≈ ¥0.34/天（可关） |
-| **合计** | **≈ ¥1.9/天** |
+| **合计** | **≈ ¥2.8/天** |
 
 ## 七、本地开发
 

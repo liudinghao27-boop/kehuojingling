@@ -78,6 +78,13 @@
   6. ✅ 云端实测通过：注册 → CSRF 登录 → 会话有效；10 个核心页面 200（/dashboard/keywords 无此路由，404 正常）；/api/videos、/api/templates?type=reply、/api/user/sender-accounts、/api/ai/history 均正常返回；资料接口 PATCH /api/user/profile 正常
   7. ✅ 文档更新：DEPLOY.md 重写为 Sealos 方案；敏感连接串/密钥移入 gitignore 的 `deploy-secrets.local.md`（仓库为 public，旧密钥已在 git 历史中，建议仓库转 private）
   8. ⏳ 待办：本机爬虫 + localhost.run 隧道重启后回填 `SCRAPER_API_URL`；费用 ≈¥1.9/天，PG 外网不用可关
+- **2026-08-29 爬虫云端化（隧道方案废弃）**：
+  1. ✅ 虚惊一场：主应用查不到是因为旧 kubeconfig 过期（cert 校验失败），资源其实一直在运行；从浏览器 localStorage 取新 kubeconfig 后一切正常
+  2. ✅ localhost.run 匿名隧道实测反复掉线（每次掉线换域名），判定达不到商用标准 → 爬虫整体迁云
+  3. ✅ 新公开仓库 `liudinghao27-boop/kehuojingling-scraper`（工作区 `scraper-cloud/` 为副本，已 gitignore；.dockerignore 排除 .github 等），GHCR 镜像自动构建且**自动继承 public**
+  4. ✅ Sealos 新建 `kehuojingling-scraper` 应用（0.5C/1G，仅内网不开公网），`SCRAPER_API_URL` 指向集群内网地址
+  5. ✅ 全链路实测通过：POST /api/videos 解析示例抖音链接 → 爬虫取回 50 条评论入库 → /api/comments 读到真实评论内容
+  6. ✅ 用户已充值 Sealos；当前总成本 ≈¥2.8/天
 
 ## 开发命令
 
