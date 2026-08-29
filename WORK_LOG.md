@@ -85,6 +85,18 @@
   4. ✅ Sealos 新建 `kehuojingling-scraper` 应用（0.5C/1G，仅内网不开公网），`SCRAPER_API_URL` 指向集群内网地址
   5. ✅ 全链路实测通过：POST /api/videos 解析示例抖音链接 → 爬虫取回 50 条评论入库 → /api/comments 读到真实评论内容
   6. ✅ 用户已充值 Sealos；当前总成本 ≈¥2.8/天
+- **2026-08-29 晚 种草回复 + 发出端语义查重（已上线）**：
+  1. 背景：用户看了视频号截流视频后要求全网调研 2026 合规截流玩法，结论转化为两项功能：观点种草回复（不留联系方式不硬广，AI 生成差异化评论）+ 发出端话术语义查重（防平台风控判营销号）
+  2. ✅ 查重库 `src/lib/safety/dedup.ts`：归一化 → 中文 bigram → Jaccard 相似度，阈值 0.55，纯本地毫秒级；`dedup.test.ts` 11 用例全过
+  3. ✅ 种草生成 `src/lib/ai/seed-reply.ts`：合规铁律 system prompt（≤80 字、禁联系方式/硬广、观点经验型），temperature 0.9，带近期已发样本避让；无 AI key 时 5 条观点句式库确定性兜底
+  4. ✅ API 契约：单条/批量回复接口新增 `generate`（种草）、`force`（强制）参数；查重拦截 409 `CONTENT_TOO_SIMILAR`（含 similarity/matchedPreview/suggestion）；批量同内容 >3 条拦截 409 `BATCH_IDENTICAL_CONTENT`；种草批量上限 20 条/次
+  5. ✅ `prisma`：`replies.mode` 字段（seed=种草），迁移 `20260829095000_add_reply_mode` 已打生产库
+  6. ✅ 前端评论页：每条 NEW/ANALYZED 评论加绿色「种草」按钮 + 批量栏「批量种草」；dialog 种草模式说明卡；409 时琥珀色「风控提醒」+「仍要发送」
+  7. ✅ 推送插曲：github.com 被墙波动（api.github.com 通）→ 用 GitHub MCP `push_files` 推 8 个文件（60d3efb、cc1da5a），网络恢复后 git fetch+rebase，本地 d764fa0 变基为 846eff3（只含 page.tsx）推上，历史无线性重复
+  8. ✅ 云端冒烟全过（CI #12/#13 Success 后重启）：单条 generate → fallback 句式且 `mode='seed'` 入库；雷同话术 409（相似度 0.769）；force 放行到发送环节；批量 4 条同内容 409 BATCH_IDENTICAL_CONTENT；批量种草 2 条差异化
+  9. ✅ 冒烟发现并修复一个 bug：批量种草生成内容只在发送成功时计入批内查重 → 发送失败时同批撞同一句式；4889283 改为生成确定即计入，复测两条内容不同
+  10. 已知限制：fallback 句式库仅 5 条，无 AI key 时对同一评论重复种草可能选到同一句（FAILED 不入查重历史是有意设计，避免挡住 force 重试）；5 个既有测试失败（Neon 测试库 + Prisma pg adapter 兼容性：process-send-job×4、sender-accounts×1）与本次无关，独立技术债
+  11. 演示账号未配 DOUYIN Cookie，发送环节一律 FAILED（预期）；真实发送需用户在设置页配置平台 Cookie
 
 ## 开发命令
 
