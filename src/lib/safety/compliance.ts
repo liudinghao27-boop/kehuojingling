@@ -28,8 +28,20 @@ export function shortDelay(min: number = 500, max: number = 2000): Promise<void>
 // 发送时间窗口
 // ---------------------------------------------------------------------------
 
-/** 安全发送小时（避开平台风控高峰期） */
+/** 安全发送小时（避开平台风控高峰期），按北京时间判定 */
 const SAFE_HOURS = [10, 11, 15, 16, 17, 19, 20];
+
+/**
+ * 北京时间（Asia/Shanghai）固定 UTC+8、无夏令时。
+ * 云端容器时区为 UTC，直接用服务器本地小时会把窗口整体偏移 8 小时
+ * （实测发送被集中到北京深夜，反而更触风控），因此窗口判定一律换算到北京时间。
+ */
+const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/** 指定时刻的北京时间小时（与服务器本地时区无关） */
+function beijingHour(date: Date = new Date()): number {
+  return new Date(date.getTime() + BEIJING_OFFSET_MS).getUTCHours();
+}
 
 /** 随机选择发送时间（9:00-22:00） */
 export function getRandomSendTime(): Date {
@@ -46,27 +58,29 @@ export function getRandomSendTime(): Date {
   return sendTime;
 }
 
-/** 获取下一个安全发送时间 */
+/** 获取下一个安全发送时间（按北京时间窗口计算，返回绝对时间） */
 export function getNextSafeSendTime(): Date {
   const now = new Date();
-  const hour = now.getHours();
+  // 北京时间的 UTC 平移表示，便于用 UTC 方法做整点/跨天运算
+  const bjNow = new Date(now.getTime() + BEIJING_OFFSET_MS);
+  const hour = bjNow.getUTCHours();
 
   if (SAFE_HOURS.includes(hour)) {
     // 当前在安全窗口，延迟 5-30 分钟
     return new Date(now.getTime() + (5 + Math.random() * 25) * 60 * 1000);
   }
 
-  // 推到下一个安全窗口
+  // 推到下一个安全窗口（北京时间的下一个 SAFE_HOURS 整点，随机分钟）
   const nextSafeHour = SAFE_HOURS.find(h => h > hour) ?? SAFE_HOURS[0] + 24;
-  const target = new Date(now);
-  target.setHours(nextSafeHour % 24, Math.floor(Math.random() * 60), 0, 0);
-  if (nextSafeHour > 24) target.setDate(target.getDate() + 1);
-  return target;
+  const target = new Date(bjNow);
+  target.setUTCHours(nextSafeHour % 24, Math.floor(Math.random() * 60), 0, 0);
+  if (nextSafeHour >= 24) target.setUTCDate(target.getUTCDate() + 1);
+  return new Date(target.getTime() - BEIJING_OFFSET_MS);
 }
 
-/** 检查当前是否在安全发送窗口 */
+/** 检查当前是否在安全发送窗口（北京时间） */
 export function isSafeSendTime(): boolean {
-  return SAFE_HOURS.includes(new Date().getHours());
+  return SAFE_HOURS.includes(beijingHour());
 }
 
 // ---------------------------------------------------------------------------
