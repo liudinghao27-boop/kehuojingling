@@ -15,7 +15,17 @@ export function extractMatchedKeywords(content: string, keywords: string[]): str
   return Array.from(matched);
 }
 
-export async function scrapeAndSaveComments(videoId: string, url: string) {
+export async function scrapeAndSaveComments(
+  videoId: string,
+  url: string,
+  options?: {
+    /**
+     * 是否为最终一次尝试（Bull 队列重试场景）。
+     * 仅最终失败才递增视频连续失败计数；默认 true（直接调用视为最终尝试）。
+     */
+    isFinalAttempt?: boolean;
+  }
+) {
   console.log(`[Scrape] Processing video ${videoId}: ${url}`);
 
   try {
@@ -25,11 +35,15 @@ export async function scrapeAndSaveComments(videoId: string, url: string) {
       throw new Error(`无法解析视频链接: ${url}`);
     }
 
-    // 2. 抓取评论（优先真实 API，失败则回退到 mock）
+    // 2. 抓取评论（真实 API 失败默认直接抛错，避免 mock 假数据静默入库；
+    //    仅显式设置 SCRAPER_ALLOW_MOCK=true 时才回退 mock，用于演示/调试）
     let comments: Awaited<ReturnType<typeof scrapeComments>> = [];
     try {
       comments = await scrapeCommentsReal(parsedVideo);
     } catch (error) {
+      if (process.env.SCRAPER_ALLOW_MOCK !== 'true') {
+        throw error;
+      }
       console.warn(`[Scrape] Real scraper failed for ${videoId}, using mock:`, error);
       comments = await scrapeComments(parsedVideo, { maxComments: 50 });
     }
@@ -135,29 +149,33 @@ export async function scrapeAndSaveComments(videoId: string, url: string) {
   } catch (error) {
     console.error(`[Scrape] Failed to process video ${videoId}:`, getErrorMessage(error));
 
-    // 递增连续失败计数，达到阈值后再标记为 ERROR
-    try {
-      const video = await prisma.video.update({
-        where: { id: videoId },
-        data: { consecutiveFailures: { increment: 1 } },
-      });
-
-      if (video.consecutiveFailures >= 3) {
-        await prisma.video.update({
+    // 只在最终尝试失败时递增连续失败计数：Bull 周期内的自动重试不计，
+    // 避免一次抖动（3 次重试）直接把视频打成 ERROR
+    if (options?.isFinalAttempt ?? true) {
+      // 递增连续失败计数，达到阈值后再标记为 ERROR
+      try {
+        const video = await prisma.video.update({
           where: { id: videoId },
-          data: { status: 'ERROR' },
+          data: { consecutiveFailures: { increment: 1 } },
         });
-        await prisma.activity.create({
-          data: {
-            type: 'ERROR',
-            description: `视频「${video.title || video.url}」连续 3 次抓取失败，已暂停监控`,
-            metadata: { videoId, failures: video.consecutiveFailures },
-            userId: video.userId,
-          },
-        });
+
+        if (video.consecutiveFailures >= 3) {
+          await prisma.video.update({
+            where: { id: videoId },
+            data: { status: 'ERROR' },
+          });
+          await prisma.activity.create({
+            data: {
+              type: 'ERROR',
+              description: `视频「${video.title || video.url}」连续 3 次抓取失败，已暂停监控`,
+              metadata: { videoId, failures: video.consecutiveFailures },
+              userId: video.userId,
+            },
+          });
+        }
+      } catch (e) {
+        console.error('Update video failure count failed:', e);
       }
-    } catch (e) {
-      console.error('Update video failure count failed:', e);
     }
 
     throw error;

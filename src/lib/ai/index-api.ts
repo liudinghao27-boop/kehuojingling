@@ -54,6 +54,8 @@ async function callIndexApi(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({ keywords }),
+      // 外部指数 API 不可控，限制 30s 超时避免长时间挂起
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
@@ -84,6 +86,10 @@ async function callIndexApi(
       })
       .filter((item) => item !== null) as IndexDataPoint[];
   } catch (error) {
+    if ((error as { name?: string })?.name === 'TimeoutError') {
+      console.warn(`[${source}] Index API 请求超时（30s）`);
+      return [];
+    }
     console.warn(`[${source}] Index API call failed:`, getErrorMessage(error));
     return [];
   }

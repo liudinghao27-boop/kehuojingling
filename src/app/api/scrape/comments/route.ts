@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { parseVideoUrl, scrapeCommentsReal } from '@/lib/scraper/douyin';
 import { analyzeComments } from '@/lib/ai/noise';
 import { tryDecryptAiApiKey } from '@/lib/encryption';
+import { checkPlanLimit, PlanType } from '@/lib/plans';
 
 const scrapeSchema = z.object({
   url: z.string().min(1, '请输入视频链接'),
@@ -31,6 +32,12 @@ export async function POST(req: NextRequest) {
 
     const { url, platform } = result.data;
 
+    const plan = (session.user.plan || 'FREE') as PlanType;
+    const limitCheck = await checkPlanLimit(session.user.id, plan, 'videos');
+    if (!limitCheck.allowed) {
+      return NextResponse.json({ error: limitCheck.message }, { status: 403 });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
       select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true, noiseRules: true },
@@ -47,6 +54,15 @@ export async function POST(req: NextRequest) {
         { error: '无法解析视频链接，请检查链接格式' },
         { status: 400 }
       );
+    }
+
+    // 按 (userId, url) 去重，同一视频不允许重复添加
+    const existingVideo = await prisma.video.findFirst({
+      where: { userId: session.user.id, url: parsedVideo.originalUrl },
+      select: { id: true },
+    });
+    if (existingVideo) {
+      return NextResponse.json({ error: '该视频已添加' }, { status: 409 });
     }
 
     // 抓取评论（接入 Evil0ctal 开源爬虫）
@@ -132,6 +148,15 @@ export async function GET(req: NextRequest) {
 
     if (!videoId) {
       return NextResponse.json({ error: '缺少视频ID' }, { status: 400 });
+    }
+
+    // 归属校验：只能读取自己视频下的评论
+    const ownedVideo = await prisma.video.findFirst({
+      where: { id: videoId, userId: session.user.id },
+      select: { id: true },
+    });
+    if (!ownedVideo) {
+      return NextResponse.json({ error: '视频不存在' }, { status: 404 });
     }
 
     const comments = await prisma.comment.findMany({

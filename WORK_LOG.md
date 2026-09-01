@@ -2,101 +2,46 @@
 
 > 仅保留最近一次工作记录，每次保存自动覆盖。
 
-## 最后状态：2026-08-12
+## 最后状态：2026-09-01
 
 ## 本次完成
 
-### 方案 A Phase 1：账号池 + 基础熔断（✅ 已完成并验证）
+### P1 修复 T7：发送链路改走队列（✅ 已完成并验证）
 
-依据 `docs/plans/2026-07-24-plan-a-playwright-risk-control.md`：
+依据 `docs/plans/2026-08-29-p1-fixes.md` T7（计划最后一项，至此 P1 全部清零）：
 
-- **Schema**：`prisma/schema.prisma` 新增 `SenderAccount` 模型 + `AccountStatus` 枚举；迁移 `prisma/migrations/20260724182534_add_sender_accounts` **已应用**（主库 + 测试库）。
-- **账号池** `src/lib/sender/account-pool.ts`
-  - `pickAccount`（健康度 > 剩余额度 > 最久未用）、`isAccountAvailable`
-  - `handleSendFailure`（风控 -20 / 普通 -5，连续 3 次或健康度 <30 触发 2 小时冷却）、`handleSendSuccess`（回血 +2）
-  - `recoverAccount` / `recoverCoolingAccounts` / `resetDailySentCounts`
-  - 账号 CRUD + `checkContentCompliance`
-- **合规模块** `src/lib/safety/compliance.ts` 重写：敏感词库分层（联系方式/诱导词/违规词）、风险等级、`generateCompliantVariant` 自动改写、安全发送时间窗口。
-- **队列改造** `src/lib/queue/index.ts`：抽出 `processSendJob` 统一处理回复/私信，接入账号选择、发送前合规拦截与自动改写、失败熔断；新增 `maintenance` 队列（每日 0 点重置额度、每小时恢复冷却账号）；回复/私信队列加 Bull limiter。
-- **API**：`GET/POST /api/user/sender-accounts`、`GET/PATCH/DELETE /api/user/sender-accounts/[id]`（含归属校验、冷却恢复逻辑）。
-- **账号管理 UI**：`src/app/dashboard/accounts/page.tsx` —— 账号列表（平台/状态/健康度 badge、今日已发、最近成功时间、Skeleton 加载态）、平台筛选、新增/编辑 Dialog（编辑时 Cookies 留空不改、代理清空提交 null）、删除确认、状态操作（冷却恢复 / 禁用 / 启用）；`Navbar.tsx` 导航新增"账号管理"。
-- **测试**：新增 `src/lib/sender/account-pool.test.ts`（20+ 用例）、`src/app/api/user/sender-accounts/route.test.ts`、`[id]/route.test.ts`；测试基建新增 `createSenderAccount` 工厂，`clearDatabase` 增加 `sender_accounts` 表。
-- 修复 lint 未使用导入告警；`account-pool` 不再重复实现 `generateCompliantVariant`，改为从 `compliance` re-export。
+- **四路由改入队**：`comments/[id]/reply`、`[id]/dm`、`batch/reply`、`batch/dm` 从同步直发改为 `addReplyJob`/`addDmJob`（`src/lib/queue/index.ts:525,553`）入队，返回 **202 `{ queued: true }`**。鉴权/归属/配额/合规/语义查重（409 CONTENT_TOO_SIMILAR）/种草生成全部保留同步；入队失败标 FAILED 并返回 503。`addReplyJob`/`addDmJob` 签名改为 `(commentId, recordId, accountId?)`；Redis 不可用时降级为 setTimeout 直跑 processSendJob（与 addScrapeJob 降级一致）。
+- **前端适配**：comments 页提示改「已加入发送队列」语义（单条/批量），删除 202 下不存在的 502 FAILED 死代码分支。
+- **幂等（P1-5）**：`processSendJob`（`src/lib/queue/index.ts:169`）以 `recordId` 定位路由已建 Reply/Dm 行；发送前检查同 comment 同类型 SENT 记录，有则短路 `already-sent` 并清理冗余 PENDING 行；成功/失败/合规拦截均更新同一行（`markRecordFailed`），Bull 重试复用同行，FAILED→SENT 可翻转。
+- **配额口径（P1-2）**：`src/lib/plans/index.ts` `getCurrentUsage` 回复/私信从数 Activity 改为数 Reply/Dm 表今日 SENT 记录（`sentAt >= 今日0点`）；路由内写入队动作 Activity（metadata `queued: true`），发送成功 Activity 由 worker 落，dashboard 动态页两时点都合理。
+- **原子化（P1-10）**：`account-pool.ts` 新增 `claimAccountSlot`——`updateMany` 条件原子认领（ACTIVE 且 dailySent < dailyLimit → increment 1），`pickAccount` 逐个候选认领、失败换下一个；`handleSendFailure`/`handleSendSuccess` 改原子增减 + `updateMany` 边界钳制（healthScore 钳 [0,100]）。**口径注意**：认领时即扣 dailySent，失败尝试也消耗日限额（防风控更安全，避免认领-失败-释放死循环），`handleSendSuccess` 不再重复计数。
+- **consecutiveFailures（P1-7）**：`src/lib/scraper/index.ts` `scrapeAndSaveComments` 新增 `isFinalAttempt` 参数，仅 Bull 最终失败（`attemptsMade >= attempts - 1`）才递增计数/打 ERROR，单周期重试不再误伤视频状态。
+- **测试**：重写 `process-send-job.test.ts`（18 用例：幂等短路、同行翻转、认领单扣、安全窗口等）；新增 `plans/index.test.ts`（7 用例）+ 四路由测试（32 用例，mock 队列断言入队与 202/503/409/403）；`account-pool.test.ts`、`scraper/index.test.ts` 适配新行为。
 
-### 验证
+### 环境插曲（重要）
 
-### 方案 A Phase 2：行为拟人化 + 代理（✅ 已完成并验证）
+- Neon 云端测试库 schema 漂移：缺 `replies.mode` 列（迁移未应用、库内无 `_prisma_migrations` 表）。对**测试库**执行了 `prisma db push`（未动生产/开发库）。此前记录的 5 个「Prisma pg adapter 兼容」既有失败（process-send-job×4、sender-accounts stats×1）实为 schema 漂移所致，schema 同步后**全部转绿**，该技术债消除。
 
-- **拟人化** `src/lib/sender/humanize.ts`：`humanType`（逐字 pressSequentially，50-200ms/字符，5% 停顿）、`simulateHumanBrowsing`（随机滚动 2-5 次 + 鼠标移动 2-4 次）；douyin provider 打开页面后、找评论前调用，4 处 `fill` 全部替换。
-- **代理** `src/lib/sender/proxy.ts`：`parseProxyUrl`（http/socks5，认证 URL 解码）；三条启动路径（headless/persistent/fallback）均注入 proxy；共享 context 缓存 key 改为 cookies+proxy 双哈希（顺带修复了原代码复用时不校验 key 的串号隐患）。
-- **UA/指纹** `src/lib/sender/ua-pool.ts`：10 个 Chrome/Edge UA 池、随机 viewport（1200-1440×720-900）、locale zh-CN + timezone Asia/Shanghai、`applyStealthScripts`（隐藏 webdriver、补 window.chrome、languages、权限伪装）。
-- **队列** `src/lib/queue/index.ts`：`credentials.proxyUrl` 下传（有才加键）；安全窗口真正生效——`isSafeSendTime()` 为 false 时 `job.moveToDelayed(getNextSafeSendTime())` 推迟并 return，moveToDelayed 不可用/失败降级为立即发送（发送链路不崩）。窗口内 5-30 分钟抖动由入队 delay + Bull limiter 覆盖，不二次延迟。
-- **测试**：新增 `humanize.test.ts`/`proxy.test.ts`/`ua-pool.test.ts`（21 用例）、`src/lib/queue/process-send-job.test.ts`（6 用例，真实 DB + mock provider/compliance）；douyin.test.ts 新增 6 用例（proxy 注入、指纹选项、共享 context key），fake locator/page 补 pressSequentially/mouse/addInitScript，17 个既存用例零改动。
-
-### 方案 A Phase 3：监控告警 + 运营工具（✅ 已完成并验证）
-
-- **告警模块** `src/lib/monitor/alert.ts`：钉钉/企业微信 markdown webhook（10s 超时，失败只 warn 不抛错）；接入 `handleSendFailure` 冷却触发点自动推送。
-- **配置存储**：User 模型新增 `alertEnabled/alertChannelType/alertWebhook`，迁移 `20260724120016_add_user_alert_config`（开发库+测试库均已应用）。
-- **API**：`GET/PATCH /api/user/alert-config`、`POST /api/user/alert-config/test`、`GET /api/user/sender-accounts/stats`（10 字段；todaySent/todayFailed 口径为今日 replies+dms 的 SENT/FAILED 数，failureRate=失败/(成功+失败)）、`POST /api/user/sender-accounts/bulk-status`（pause: ACTIVE→DISABLED，resume: DISABLED→ACTIVE）。
-- **UI**：accounts 页顶部健康度看板（8 卡片 + 失败率 >=30% 红色警示）+「全部暂停/恢复」按钮（确认 Dialog，操作后刷新列表和看板）；settings 页「告警通知」区块（开关/渠道/Webhook/保存/发送测试）。
-- **测试**：新增 26 用例（alert 模块 7 + alert-config 路由 8 + stats 4 + bulk-status 5 + 既有适配），**24 个文件 196 用例全部通过**。
-
-### 验证
+### 验证（全部实跑）
 
 - `npx tsc --noEmit`：通过 ✅
-- `npm run lint`：通过（0 error 0 warning）✅
-- `npm test`：**通过 ✅**（24 个文件 196 个用例全部通过，2026-07-24 串行复跑确认）
-- 环境：重启电脑后 WSL2/Docker 恢复，`docker compose up -d` 正常，主库与测试库迁移均已应用。
+- `npm run lint`：0 error 0 warning ✅
+- `npm test`（Neon 测试库）：**40 个文件 306 用例全部通过** ✅（负责人复跑确认，488s）
+- `npm run build`：通过 ✅（路由表正常，`Proxy (Middleware)` 生效）
 
 ## 下次继续记录
 
-- **当前分支**：`main`。
-- **2026-08-12 商用试用了阻断项清理**：
-  1. ✅ `sender_accounts.cookies` 加密落库（AES-256-GCM，`createAccount`/`updateAccount` 写入加密，发送队列 `resolveAccountCookies` 解密并兼容历史明文）——上线前必须项已消除。
-  2. ✅ `.env.example` 补全：`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`、`SENDER_HEADLESS`、`SENDER_DEBUG`、`DOUYIN_COOKIES` 等。
-  3. ✅ 删除空 API 死目录（analyze/dm/stats/reply/send）。
-  4. ✅ 测试基线恢复：196/196 通过（本地 Docker 库 15s）；新增 `TEST_DATABASE_URL` 支持无 Docker 时用云端库跑测试（Neon 项目 `kehuojingling-test`，连接串在 gitignore 的 `.env.test`）；`testTimeout` 放宽至 30s。
-  5. ✅ `next build` 生产构建通过（44 页面，无错误无警告）。
-- **2026-08-12 晚 部署路径定稿**：
-  1. ✅ 废弃 Vercel（`vercel.json` 已删），Render Blueprint 为唯一部署路径：`render.yaml` 含 web + redis(noeviction) + PG，启动自动 `migrate deploy`；密钥值在 DEPLOY.md「生产密钥」节
-  2. ✅ 生产模式实测通过：`next start` 下 注册→CSRF 登录→鉴权 API 200；创建发送账号 Cookie 密文落库直查验证（118 字符 iv:tag:data）
-  3. ⚠️ 实测发现并修复：`.env` 缺 `PLATFORM_CREDENTIALS_ENCRYPTION_KEY` 导致生产模式创建账号 500（已补）
-  4. ✅ 代码已推送 GitHub main（d0455ef），可直接在 Render 创建 Blueprint
-- **明天开工**：
-  1. Render 创建 Blueprint（选本仓库），按 DEPLOY.md 填 sync:false 变量
-  2. 抓取服务内网穿透后填 `SCRAPER_API_URL`；试用初期 `SENDER_PROVIDER=mock`
-  3. 收集人工实测反馈，修复发现的问题
-  4. 增强项（按需）：队列积压/失败率主动告警；UA 池随 Chrome 版本更新
-  5. Phase 4（持续运营向）：Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动
-
-- **2026-08-23/24 部署迁移 Sealos（已上线）**：
-  1. ✅ Render 方案废弃（需绑卡失败），迁移 Sealos 杭州区；账号迁移至新号 `ns-qx3gkyoi`（GitHub 登录），旧号 ns-23ctphuq 资源弃用
-  2. ✅ 修复镜像构建：git 跟踪的 4 个 UI 组件文件名大写（Badge/Button/Card/Input.tsx）与 import 小写不一致，Windows 不报错、Linux module-not-found → `git mv` 改小写（cb125d7）；Dockerfile 基座 alpine → node:24-slim
-  3. ✅ 镜像 `ghcr.io/liudinghao27-boop/kehuojingling:latest` 构建成功且 GHCR 包设为 public；workflow 加 Runner build probe（失败原因写入 check-run annotation，公开 API 可查，绕开「看日志需登录」）
-  4. ✅ PG（postgresql-16.4.0）+ Redis（7.2.7）重建，迁移 8/8 成功（坑：kubeblocks 自带 cron 表导致 P3005，需先手工建空 `_prisma_migrations` 表）
-  5. ✅ 应用 App Launchpad 部署运行中，0.2C/512M/1 实例，公网 `https://ejahosctpwsb.sealoshzh.site`
-  6. ✅ 云端实测通过：注册 → CSRF 登录 → 会话有效；10 个核心页面 200（/dashboard/keywords 无此路由，404 正常）；/api/videos、/api/templates?type=reply、/api/user/sender-accounts、/api/ai/history 均正常返回；资料接口 PATCH /api/user/profile 正常
-  7. ✅ 文档更新：DEPLOY.md 重写为 Sealos 方案；敏感连接串/密钥移入 gitignore 的 `deploy-secrets.local.md`（仓库为 public，旧密钥已在 git 历史中，建议仓库转 private）
-  8. ⏳ 待办：本机爬虫 + localhost.run 隧道重启后回填 `SCRAPER_API_URL`；费用 ≈¥1.9/天，PG 外网不用可关
-- **2026-08-29 爬虫云端化（隧道方案废弃）**：
-  1. ✅ 虚惊一场：主应用查不到是因为旧 kubeconfig 过期（cert 校验失败），资源其实一直在运行；从浏览器 localStorage 取新 kubeconfig 后一切正常
-  2. ✅ localhost.run 匿名隧道实测反复掉线（每次掉线换域名），判定达不到商用标准 → 爬虫整体迁云
-  3. ✅ 新公开仓库 `liudinghao27-boop/kehuojingling-scraper`（工作区 `scraper-cloud/` 为副本，已 gitignore；.dockerignore 排除 .github 等），GHCR 镜像自动构建且**自动继承 public**
-  4. ✅ Sealos 新建 `kehuojingling-scraper` 应用（0.5C/1G，仅内网不开公网），`SCRAPER_API_URL` 指向集群内网地址
-  5. ✅ 全链路实测通过：POST /api/videos 解析示例抖音链接 → 爬虫取回 50 条评论入库 → /api/comments 读到真实评论内容
-  6. ✅ 用户已充值 Sealos；当前总成本 ≈¥2.8/天
-- **2026-08-29 晚 种草回复 + 发出端语义查重（已上线）**：
-  1. 背景：用户看了视频号截流视频后要求全网调研 2026 合规截流玩法，结论转化为两项功能：观点种草回复（不留联系方式不硬广，AI 生成差异化评论）+ 发出端话术语义查重（防平台风控判营销号）
-  2. ✅ 查重库 `src/lib/safety/dedup.ts`：归一化 → 中文 bigram → Jaccard 相似度，阈值 0.55，纯本地毫秒级；`dedup.test.ts` 11 用例全过
-  3. ✅ 种草生成 `src/lib/ai/seed-reply.ts`：合规铁律 system prompt（≤80 字、禁联系方式/硬广、观点经验型），temperature 0.9，带近期已发样本避让；无 AI key 时 5 条观点句式库确定性兜底
-  4. ✅ API 契约：单条/批量回复接口新增 `generate`（种草）、`force`（强制）参数；查重拦截 409 `CONTENT_TOO_SIMILAR`（含 similarity/matchedPreview/suggestion）；批量同内容 >3 条拦截 409 `BATCH_IDENTICAL_CONTENT`；种草批量上限 20 条/次
-  5. ✅ `prisma`：`replies.mode` 字段（seed=种草），迁移 `20260829095000_add_reply_mode` 已打生产库
-  6. ✅ 前端评论页：每条 NEW/ANALYZED 评论加绿色「种草」按钮 + 批量栏「批量种草」；dialog 种草模式说明卡；409 时琥珀色「风控提醒」+「仍要发送」
-  7. ✅ 推送插曲：github.com 被墙波动（api.github.com 通）→ 用 GitHub MCP `push_files` 推 8 个文件（60d3efb、cc1da5a），网络恢复后 git fetch+rebase，本地 d764fa0 变基为 846eff3（只含 page.tsx）推上，历史无线性重复
-  8. ✅ 云端冒烟全过（CI #12/#13 Success 后重启）：单条 generate → fallback 句式且 `mode='seed'` 入库；雷同话术 409（相似度 0.769）；force 放行到发送环节；批量 4 条同内容 409 BATCH_IDENTICAL_CONTENT；批量种草 2 条差异化
-  9. ✅ 冒烟发现并修复一个 bug：批量种草生成内容只在发送成功时计入批内查重 → 发送失败时同批撞同一句式；4889283 改为生成确定即计入，复测两条内容不同
-  10. 已知限制：fallback 句式库仅 5 条，无 AI key 时对同一评论重复种草可能选到同一句（FAILED 不入查重历史是有意设计，避免挡住 force 重试）；5 个既有测试失败（Neon 测试库 + Prisma pg adapter 兼容性：process-send-job×4、sender-accounts×1）与本次无关，独立技术债
-  11. 演示账号未配 DOUYIN Cookie，发送环节一律 FAILED（预期）；真实发送需用户在设置页配置平台 Cookie
+- **当前分支**：`main`。T1-T7 全部代码改动**尚未 commit/push**（含 T1-T6 与 T7），如需推送到 GitHub 再走提交流程（github.com 直连可能波动，必要时用 GitHub MCP push_files）。
+- **部署**：T7 改了发送路由/队列/账号池核心链路，上线前建议在 Sealos 云端做一轮真实冒烟（入队 → worker 发出 → Reply/Dm 状态翻转 → 动态页两条记录）；生产 Redis 为 noeviction 已在 render/sealos 配置中。
+- **已知限制**：
+  - PENDING 行在队列延迟期（回复 30s/私信 60s）会出现在评论「展开记录」里，与「已加入发送队列」语义自洽。
+  - 配额检查在入队时点（SENT 口径），极端并发下可能瞬时超入队（计划指定口径，接受）。
+  - Redis 降级直跑模式无 Bull limiter，进程重启任务丢失（与既有 addScrapeJob 降级同级风险）。
+  - `sender/index.ts` 的 `sendReplyToPlatform`/`sendDmToPlatform` 现已无调用方，保留未删（避免扩大改动面），后续可清理。
+- **历史待办（仍有效）**：
+  - 种草 fallback 句式库仅 5 条，无 AI key 时同评论重复种草可能撞同一句。
+  - 演示账号未配 DOUYIN Cookie，真实发送需用户在设置页配置平台 Cookie。
+  - 增强项（按需）：队列积压/失败率主动告警；UA 池随 Chrome 版本更新；Phase 4（Cookie 自动刷新、账号分组、话术 A/B 风控率、抓取-发送联动）。
 
 ## 开发命令
 
@@ -107,7 +52,7 @@ cd /e/ai/YJ-HUOKE && docker compose up -d
 # 一键启动 Next.js + 抓取服务（开发）
 cd /e/ai/YJ-HUOKE && npm run dev:all
 
-# 运行测试
+# 运行测试（无 Docker 时用 .env.test 的 Neon 云端测试库）
 cd /e/ai/YJ-HUOKE && npm test
 ```
 
@@ -115,4 +60,4 @@ cd /e/ai/YJ-HUOKE && npm test
 
 - 百度指数 / 抖音热点宝当前为占位实现。
 - 抖音自动回复 / 私信依赖真实 Cookie 和 Playwright，生产需单独维护。
-- Cookie 在 `sender_accounts.cookies` 目前明文存储，`createAccount` 留有加密 TODO（`PLATFORM_CREDENTIALS_ENCRYPTION_KEY`），上线前必须补。
+- ~~发送链路同步直发~~ → 已队列化（T7），账号池轮换、日限额、熔断、Bull limiter、安全窗口现已真正生效。

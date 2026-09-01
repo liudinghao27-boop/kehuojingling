@@ -42,6 +42,27 @@ export async function POST(req: NextRequest) {
     const aiApiKey = tryDecryptAiApiKey(user?.aiApiKey);
     const data = await researchWebPage(result.data.url, aiApiKey);
 
+    // 路由内直接落库历史：aiResearch 配额按今日历史记录数统计；
+    // 网页研究不涉及指数数据，usedRealIndexData 固定为 false
+    await prisma.aiResearchHistory.create({
+      data: {
+        userId: session.user.id,
+        title: result.data.url,
+        url: result.data.url,
+        combinedSearchQueries: [],
+        coreKeywords: [],
+        longTailKeywords: [],
+        painPoints: data.painPoints,
+        competitorAccounts: data.competitorAccounts,
+        usedRealIndexData: false,
+        researchSummary: data.summary,
+        researchHotTopics: data.hotTopics,
+        researchPainPoints: data.painPoints,
+        researchCompetitors: data.competitorAccounts,
+        researchKeywords: data.keywords,
+      },
+    });
+
     return NextResponse.json({ success: true, data });
   } catch (error) {
     console.error('AI research API error:', error);

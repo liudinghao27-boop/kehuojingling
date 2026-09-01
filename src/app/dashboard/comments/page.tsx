@@ -114,6 +114,7 @@ function CommentsContent() {
   const [replyTemplates, setReplyTemplates] = useState<Template[]>([]);
   const [dmTemplates, setDmTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "high" | "new" | "sent">(intentParam === "high" ? "high" : "all");
   const [noiseFilter, setNoiseFilter] = useState<"all" | "false" | "true">("false");
   const [search, setSearch] = useState("");
@@ -192,6 +193,7 @@ function CommentsContent() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const result = await fetchCommentsData();
       setComments(result.comments);
@@ -201,6 +203,7 @@ function CommentsContent() {
       setKeywordMonitors(result.keywordMonitors);
     } catch (error) {
       console.error("Fetch comments error:", error);
+      setError("加载评论数据失败");
       addToast("加载评论数据失败", "error");
     } finally {
       setLoading(false);
@@ -245,11 +248,13 @@ function CommentsContent() {
           setReplyTemplates(result.replyTemplates);
           setDmTemplates(result.dmTemplates);
           setKeywordMonitors(result.keywordMonitors);
+          setError(null);
         }
       })
       .catch((error) => {
         if (!ignore) {
           console.error("Fetch comments error:", error);
+          setError("加载评论数据失败");
           addToast("加载评论数据失败", "error");
         }
       })
@@ -399,25 +404,20 @@ function CommentsContent() {
       }
 
       if (batchMode) {
-        const successCount = data.count || 0;
+        const queuedCount = data.count || 0;
         const failedCount = data.failed || 0;
         addToast(
-          seedMode
-            ? `种草回复了 ${successCount} 位用户（每条内容均不同）${failedCount > 0 ? `，${failedCount} 位失败` : ""}`
-            : `${dialogType === "reply" ? "回复" : "私信"}了 ${successCount} 位用户${failedCount > 0 ? `，${failedCount} 位失败` : ""}`,
+          `已将 ${queuedCount} 条${dialogType === "reply" ? (seedMode ? "种草回复" : "回复") : "私信"}加入发送队列${failedCount > 0 ? `，${failedCount} 条未入队` : ""}`,
           failedCount > 0 ? "error" : "success"
         );
         setSelectedIds(new Set());
       } else {
-        const record = data.reply || data.dm;
-        const isFailed = record?.status === "FAILED";
+        // 202 入队语义：发送结果由 worker 异步完成，稍后见展开记录
         addToast(
-          isFailed
-            ? (data.error || `${dialogType === "reply" ? "回复" : "私信"}发送失败`)
-            : seedMode
-              ? "种草回复已发送（内容见展开记录）"
-              : (dialogType === "reply" ? "回复已发送" : "私信已发送"),
-          isFailed ? "error" : "success"
+          seedMode
+            ? "种草回复已加入发送队列（内容见展开记录）"
+            : (dialogType === "reply" ? "回复已加入发送队列" : "私信已加入发送队列"),
+          "success"
         );
       }
 
@@ -566,6 +566,18 @@ function CommentsContent() {
                 {[1, 2, 3].map((i) => (
                   <Skeleton key={i} className="h-40 w-full rounded-2xl" />
                 ))}
+              </div>
+            ) : error ? (
+              <div className="rounded-2xl bg-red-50 p-4 text-sm text-red-600 flex items-center justify-between gap-4">
+                <span>{error}</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={fetchData}
+                  className="rounded-full px-5 py-2 h-auto text-sm flex-shrink-0"
+                >
+                  重试
+                </Button>
               </div>
             ) : (
               <div className="space-y-4">

@@ -1309,6 +1309,38 @@ async function sendDmOperation(
   await page.waitForTimeout(2500);
   await debugScreenshot(page, 'dm-after-send');
 
+  // 验证：私信文本应出现在聊天窗口的消息记录中（发送成功后消息会立即上屏）。
+  // 与回复链路的 verifyReplyPublished 同理，不能再默认点击发送即成功。
+  const verifyDmSent = async (dmText: string): Promise<boolean> => {
+    const textAppeared = () =>
+      page.evaluate((text) => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          if (!node.textContent?.includes(text)) continue;
+          // 发送失败时草稿仍停留在输入框内，不算成功
+          if (node.parentElement?.closest('textarea, input, [contenteditable]')) continue;
+          return true;
+        }
+        return false;
+      }, dmText);
+
+    // 消息上屏可能略有延迟，最多轮询 4 次（每次间隔 1 秒）
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (await textAppeared()) return true;
+      await page.waitForTimeout(1000);
+    }
+    return false;
+  };
+
+  const dmSent = await verifyDmSent(content);
+  if (!dmSent) {
+    return {
+      success: false,
+      error: '点击发送后未在聊天窗口检测到私信内容，可能未真正发送成功',
+    };
+  }
+
   return { success: true };
 }
 

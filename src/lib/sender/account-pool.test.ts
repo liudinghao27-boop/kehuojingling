@@ -3,6 +3,7 @@ import { clearDatabase, prisma } from '@/lib/test/setup';
 import { createUser, createSenderAccount } from '@/lib/test/factories';
 import {
   pickAccount,
+  claimAccountSlot,
   isAccountAvailable,
   isRiskControlError,
   handleSendFailure,
@@ -99,6 +100,58 @@ describe('pickAccount', () => {
     });
     expect(picked?.id).toBe(b.id);
   });
+
+  it('选中账号时原子认领当日额度（dailySent +1）', async () => {
+    const user = await createUser();
+    const account = await createSenderAccount(user.id, { dailySent: 3 });
+
+    const picked = await pickAccount({ userId: user.id, platform: 'DOUYIN' });
+
+    expect(picked?.id).toBe(account.id);
+    const after = await prisma.senderAccount.findUnique({ where: { id: account.id } });
+    expect(after?.dailySent).toBe(4);
+  });
+
+  it('额度只剩 1 时只能认领一次，再次挑选返回 null', async () => {
+    const user = await createUser();
+    await createSenderAccount(user.id, { dailySent: 49, dailyLimit: 50 });
+
+    const first = await pickAccount({ userId: user.id, platform: 'DOUYIN' });
+    expect(first).not.toBeNull();
+
+    // 额度已被上一次认领占满，并发/重试场景下不能超发
+    const second = await pickAccount({ userId: user.id, platform: 'DOUYIN' });
+    expect(second).toBeNull();
+  });
+});
+
+describe('claimAccountSlot', () => {
+  beforeEach(async () => {
+    await clearDatabase();
+  });
+
+  it('可用账号认领成功并扣减当日额度', async () => {
+    const user = await createUser();
+    const account = await createSenderAccount(user.id, { dailySent: 10 });
+
+    const claimed = await claimAccountSlot(account.id);
+
+    expect(claimed?.id).toBe(account.id);
+    expect(claimed?.dailySent).toBe(11);
+  });
+
+  it('冷却中或额度已满的账号认领失败返回 null', async () => {
+    const user = await createUser();
+    const cooling = await createSenderAccount(user.id, { label: '冷却', status: 'COOLING' });
+    const exhausted = await createSenderAccount(user.id, { label: '超额', dailySent: 50, dailyLimit: 50 });
+
+    expect(await claimAccountSlot(cooling.id)).toBeNull();
+    expect(await claimAccountSlot(exhausted.id)).toBeNull();
+
+    // 认领失败不应改动计数
+    const after = await prisma.senderAccount.findUnique({ where: { id: exhausted.id } });
+    expect(after?.dailySent).toBe(50);
+  });
 });
 
 describe('isAccountAvailable', () => {
@@ -187,6 +240,19 @@ describe('handleSendFailure', () => {
     expect(updated.healthScore).toBe(29);
   });
 
+  it('风控扣分时健康度钳制到 0，不会变负数', async () => {
+    const user = await createUser();
+    const account = await createSenderAccount(user.id, { healthScore: 10 });
+
+    const { account: updated, shouldCooling } = await handleSendFailure({
+      accountId: account.id,
+      error: '需要完成验证码验证',
+    });
+
+    expect(updated.healthScore).toBe(0);
+    expect(shouldCooling).toBe(true);
+  });
+
   it('记录活动日志', async () => {
     const user = await createUser();
     const account = await createSenderAccount(user.id, { label: '主号' });
@@ -214,13 +280,22 @@ describe('handleSendSuccess', () => {
 
     expect(updated.healthScore).toBe(92);
     expect(updated.failCount).toBe(0);
-    expect(updated.dailySent).toBe(6);
+    // dailySent 在 pickAccount/claimAccountSlot 原子认领时已扣减，成功回调不再重复计数
+    expect(updated.dailySent).toBe(5);
     expect(updated.lastSuccessAt).not.toBeNull();
   });
 
   it('健康度不超过 100', async () => {
     const user = await createUser();
     const account = await createSenderAccount(user.id, { healthScore: 100 });
+
+    const updated = await handleSendSuccess(account.id);
+    expect(updated.healthScore).toBe(100);
+  });
+
+  it('健康度 99 时回血被钳制到 100', async () => {
+    const user = await createUser();
+    const account = await createSenderAccount(user.id, { healthScore: 99 });
 
     const updated = await handleSendSuccess(account.id);
     expect(updated.healthScore).toBe(100);

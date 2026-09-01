@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { User, Mail, Crown, Smartphone, Lock, Bookmark, Copy } from "lucide-react";
+import { MonitorKeywordsSection } from "./monitor-keywords-section";
 import { getErrorMessage } from "@/lib/errors";
 import { DEFAULT_NOISE_RULES, type NoiseRules } from "@/lib/ai/noise";
 
@@ -1184,6 +1185,9 @@ export default function SettingsPage() {
                 Cookie 仅用于自动回复/私信，请妥善保管，定期更新。
               </p>
           </CollapsibleCard>
+
+          {/* Monitor Keywords */}
+          <MonitorKeywordsSection />
         </div>
       </main>
     </div>

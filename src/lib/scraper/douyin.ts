@@ -9,8 +9,11 @@
 export function getScraperApiUrl(): string {
   const configured = process.env.SCRAPER_API_URL?.trim();
   if (!configured || configured === '/api/scraper') {
-    // 走 Next.js 代理路由，开发默认 localhost:3000
-    return 'http://localhost:3000/api/scraper';
+    // 服务端自调 /api/scraper 代理缺少登录态必然 401，必须配置抓取服务直连地址
+    throw new Error(
+      '未配置抓取服务地址：请将 SCRAPER_API_URL 设置为抓取服务直连地址（如 http://localhost:8000）；' +
+        '不要填 /api/scraper，服务端自调代理路由会因缺少登录态返回 401'
+    );
   }
   return configured.replace(/\/$/, '');
 }
@@ -20,6 +23,20 @@ function buildScraperUrl(endpoint: string, path: string, search: string): string
   const isProxy = base.endsWith('/api/scraper');
   const prefix = isProxy ? '' : '/api';
   return `${base}${prefix}${path}${search}`;
+}
+
+// 抓取服务响应可能较慢，统一 60s 超时并给出友好错误
+const SCRAPER_TIMEOUT_MS = 60_000;
+
+async function scraperFetch(url: string): Promise<Response> {
+  try {
+    return await fetch(url, { method: 'GET', signal: AbortSignal.timeout(SCRAPER_TIMEOUT_MS) });
+  } catch (error) {
+    if ((error as { name?: string })?.name === 'TimeoutError') {
+      throw new Error(`抓取服务请求超时（${SCRAPER_TIMEOUT_MS / 1000}s），请稍后重试`);
+    }
+    throw error;
+  }
 }
 
 interface ParsedVideo {
@@ -227,13 +244,12 @@ export async function scrapeCommentsReal(
   const endpoint = apiEndpoint.replace(/\/$/, '');
 
   // 1. 先解析出平台内部视频ID
-  const hybridRes = await fetch(
+  const hybridRes = await scraperFetch(
     buildScraperUrl(
       endpoint,
       '/hybrid/video_data',
       `?url=${encodeURIComponent(parsedVideo.originalUrl)}`
-    ),
-    { method: 'GET' }
+    )
   );
 
   if (!hybridRes.ok) {
@@ -249,13 +265,12 @@ export async function scrapeCommentsReal(
 
   // 2. 拉取评论（抖音）
   if (parsedVideo.platform === 'DOUYIN') {
-    const commentsRes = await fetch(
+    const commentsRes = await scraperFetch(
       buildScraperUrl(
         endpoint,
         '/douyin/web/fetch_video_comments',
         `?aweme_id=${awemeId}&cursor=0&count=50`
-      ),
-      { method: 'GET' }
+      )
     );
 
     if (!commentsRes.ok) {

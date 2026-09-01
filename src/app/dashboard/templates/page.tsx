@@ -43,6 +43,9 @@ export default function TemplatesPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ id: "", name: "", content: "", isDefault: false });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // 重试计数：点击重试时 +1，驱动下方 effect 重新拉取
+  const [reloadKey, setReloadKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -86,11 +89,13 @@ export default function TemplatesPage() {
         if (!ignore) {
           setReplyTemplates(result.replyTemplates);
           setDmTemplates(result.dmTemplates);
+          setError(null);
         }
       })
       .catch((error) => {
         if (!ignore) {
           console.error("Fetch templates error:", error);
+          setError("加载话术模板失败");
           addToast("加载话术模板失败", "error");
         }
       })
@@ -100,7 +105,14 @@ export default function TemplatesPage() {
     return () => {
       ignore = true;
     };
-  }, [fetchTemplatesData, addToast]);
+  }, [fetchTemplatesData, addToast, reloadKey]);
+
+  // 重试：重置状态后触发重新拉取
+  const handleRetry = () => {
+    setError(null);
+    setLoading(true);
+    setReloadKey((k) => k + 1);
+  };
 
   const aiPromptInitialized = useRef(false);
   useLayoutEffect(() => {
@@ -444,6 +456,18 @@ export default function TemplatesPage() {
                 {[1, 2, 3].map((i) => (
                   <Skeleton key={i} className="h-28 w-full rounded-2xl" />
                 ))}
+              </div>
+            ) : error ? (
+              <div className="rounded-2xl bg-red-50 p-4 text-sm text-red-600 flex items-center justify-between gap-4">
+                <span>{error}</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleRetry}
+                  className="rounded-full px-5 py-2 h-auto text-sm flex-shrink-0"
+                >
+                  重试
+                </Button>
               </div>
             ) : (
               <div className="space-y-3">

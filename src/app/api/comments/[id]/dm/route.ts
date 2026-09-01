@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/db';
 import { checkCompliance } from '@/lib/safety/compliance';
-import { sendDmToPlatform } from '@/lib/sender';
+import { addDmJob } from '@/lib/queue';
 import { checkPlanLimit, PlanType } from '@/lib/plans';
 import { z } from 'zod';
 
@@ -82,7 +82,7 @@ export async function POST(
       );
     }
 
-    // 创建私信记录（初始状态 PENDING）
+    // 创建私信记录（初始状态 PENDING），发送动作异步化：入队后由 worker 经账号池/限流/安全窗口发出
     const dm = await prisma.dm.create({
       data: {
         content: dmContent,
@@ -91,69 +91,40 @@ export async function POST(
       },
     });
 
-    // 尝试发送到平台
-    const sendResult = await sendDmToPlatform({
-      userId: session.user.id,
-      platform: comment.video.platform,
-      videoUrl: comment.video.url,
-      commentId,
-      authorName: comment.authorName,
-      commentContent: comment.content,
-      content: dmContent,
-    });
-
-    // 根据发送结果更新状态
-    if (sendResult.success) {
-      await prisma.$transaction([
-        prisma.dm.update({
-          where: { id: dm.id },
-          data: { status: 'SENT', sentAt: new Date() },
-        }),
-        prisma.comment.update({
-          where: { id: commentId },
-          data: { status: 'DM_SENT' },
-        }),
-      ]);
-
-      await prisma.activity.create({
-        data: {
-          type: 'DM_SENT',
-          description: `私信了用户 ${comment.authorName}`,
-          metadata: { commentId, dmId: dm.id },
-          userId: session.user.id,
-        },
-      });
-    } else {
+    try {
+      await addDmJob(commentId, dm.id);
+    } catch (queueError) {
+      // 入队失败：标记失败并同步报错，避免记录永远挂在 PENDING
+      console.error('DM enqueue error:', queueError);
       await prisma.dm.update({
         where: { id: dm.id },
         data: { status: 'FAILED' },
       });
-
-      return NextResponse.json(
-        {
-          error: sendResult.error || '发送失败',
-          dm: {
-            id: dm.id,
-            status: 'FAILED',
-          },
-        },
-        { status: 502 }
-      );
+      return NextResponse.json({ error: '发送队列不可用，请稍后重试' }, { status: 503 });
     }
 
-    const updatedDm = await prisma.dm.findUnique({
-      where: { id: dm.id },
-    });
-
-    return NextResponse.json({
-      success: true,
-      dm: {
-        id: updatedDm!.id,
-        content: updatedDm!.content,
-        status: updatedDm!.status,
-        sentAt: updatedDm!.sentAt?.toISOString(),
+    // 记录入队动作（发送结果由 worker 另行记录）
+    await prisma.activity.create({
+      data: {
+        type: 'DM_SENT',
+        description: `私信已加入发送队列（用户 ${comment.authorName}）`,
+        metadata: { commentId, dmId: dm.id, queued: true },
+        userId: session.user.id,
       },
     });
+
+    return NextResponse.json(
+      {
+        queued: true,
+        dm: {
+          id: dm.id,
+          content: dm.content,
+          status: dm.status,
+          sentAt: dm.sentAt?.toISOString(),
+        },
+      },
+      { status: 202 }
+    );
   } catch (error) {
     console.error('DM comment error:', error);
     return NextResponse.json({ error: '私信失败，请稍后重试' }, { status: 500 });

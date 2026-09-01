@@ -68,6 +68,9 @@ export default function VideosPage() {
   const [keywordMonitors, setKeywordMonitors] = useState<KeywordMonitor[]>([]);
   const [selectedKeywordMonitorId, setSelectedKeywordMonitorId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // 重试计数：点击重试时 +1，驱动下方 effect 重新拉取
+  const [reloadKey, setReloadKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [newUrl, setNewUrl] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("DOUYIN");
@@ -122,11 +125,13 @@ export default function VideosPage() {
         if (!ignore) {
           setVideos(items);
           setKeywordMonitors(monitors);
+          setError(null);
         }
       })
       .catch((error) => {
         if (!ignore) {
           console.error('Fetch videos error:', error);
+          setError('获取视频列表失败');
           addToast('获取视频列表失败', 'error');
         }
       })
@@ -136,7 +141,14 @@ export default function VideosPage() {
     return () => {
       ignore = true;
     };
-  }, [fetchVideosData, fetchKeywordMonitors, addToast]);
+  }, [fetchVideosData, fetchKeywordMonitors, addToast, reloadKey]);
+
+  // 重试：重置状态后触发重新拉取
+  const handleRetry = () => {
+    setError(null);
+    setLoading(true);
+    setReloadKey((k) => k + 1);
+  };
 
   const handleAddVideo = async () => {
     if (!newUrl.trim()) { addToast("请输入视频链接", "error"); return; }
@@ -329,6 +341,18 @@ export default function VideosPage() {
                 {[1, 2, 3].map((i) => (
                   <Skeleton key={i} className="h-24 w-full rounded-2xl" />
                 ))}
+              </div>
+            ) : error ? (
+              <div className="rounded-2xl bg-red-50 p-4 text-sm text-red-600 flex items-center justify-between gap-4">
+                <span>{error}</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleRetry}
+                  className="rounded-full px-5 py-2 h-auto text-sm flex-shrink-0"
+                >
+                  重试
+                </Button>
               </div>
             ) : videos.length === 0 ? (
               <div className="text-center py-16">

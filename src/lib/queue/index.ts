@@ -15,6 +15,7 @@ import { prisma } from '../db';
 import { scrapeAndSaveComments } from '../scraper';
 import {
   pickAccount,
+  claimAccountSlot,
   handleSendSuccess,
   handleSendFailure,
   recoverCoolingAccounts,
@@ -24,6 +25,7 @@ import {
 import { checkCompliance, generateCompliantVariant, getNextSafeSendTime, isSafeSendTime } from '../safety/compliance';
 import { getSenderProvider } from '../sender';
 import { Platform } from '@prisma/client';
+import type { Reply } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Redis 连接
@@ -149,19 +151,29 @@ async function initMaintenanceSchedule(maintenanceQueue: Bull.Queue) {
 
 export interface SendJobData {
   commentId: string;
-  templateId: string;
+  /** 路由入队时已创建的 Reply.id / Dm.id，发送结果复用更新同一行 */
+  recordId: string;
   accountId?: string;
   priority?: number;
+}
+
+/** 把任务对应的 Reply/Dm 行标记为失败（复用同一行，供 Bull 重试时再次更新） */
+async function markRecordFailed(type: 'reply' | 'dm', recordId: string) {
+  if (type === 'reply') {
+    await prisma.reply.update({ where: { id: recordId }, data: { status: 'FAILED' } });
+  } else {
+    await prisma.dm.update({ where: { id: recordId }, data: { status: 'FAILED' } });
+  }
 }
 
 export async function processSendJob(
   job: Bull.Job<SendJobData>,
   type: 'reply' | 'dm'
 ): Promise<{ success: boolean; skipped?: boolean; reason?: string }> {
-  const { commentId, templateId, accountId } = job.data;
+  const { commentId, recordId, accountId } = job.data;
   const logPrefix = type === 'reply' ? '[Reply]' : '[DM]';
 
-  console.log(`${logPrefix} Processing comment ${commentId}, template ${templateId}`);
+  console.log(`${logPrefix} Processing comment ${commentId}, record ${recordId}`);
 
   // 1. 获取评论、视频、用户信息
   const comment = await prisma.comment.findUnique({
@@ -180,51 +192,73 @@ export async function processSendJob(
   const userId = comment.video.userId;
   const platform = comment.video.platform as Platform;
 
-  // 2. 获取模板内容
-  let templateContent: string;
-  if (type === 'reply') {
-    const template = await prisma.replyTemplate.findUnique({
-      where: { id: templateId },
-    });
-    if (!template) throw new Error(`回复模板不存在: ${templateId}`);
-    templateContent = template.content;
-  } else {
-    const template = await prisma.dmTemplate.findUnique({
-      where: { id: templateId },
-    });
-    if (!template) throw new Error(`私信模板不存在: ${templateId}`);
-    templateContent = template.content;
+  // 2. 取出发送内容与上下文（内容在路由入队时已写入 Reply/Dm 行）
+  const record = type === 'reply'
+    ? await prisma.reply.findUnique({ where: { id: recordId } })
+    : await prisma.dm.findUnique({ where: { id: recordId } });
+
+  if (!record || record.commentId !== commentId) {
+    throw new Error(`发送记录不存在或与评论不匹配: ${recordId}`);
+  }
+  // 种草标识（仅回复有 mode 字段），用于活动记录描述
+  const mode: string | null = type === 'reply' ? (record as Reply).mode : null;
+
+  // 3. 幂等：该评论已有同类型 SENT 记录则短路跳过（防 Bull 重试/重复入队导致重发）
+  const existingSent = type === 'reply'
+    ? await prisma.reply.findFirst({ where: { commentId, status: 'SENT' } })
+    : await prisma.dm.findFirst({ where: { commentId, status: 'SENT' } });
+
+  if (existingSent) {
+    console.log(`${logPrefix} 评论 ${commentId} 已有成功记录，跳过重复发送`);
+    if (existingSent.id !== record.id && record.status === 'PENDING') {
+      // 清掉本次重复入队的冗余行，避免永远挂在 PENDING
+      if (type === 'reply') {
+        await prisma.reply.delete({ where: { id: record.id } });
+      } else {
+        await prisma.dm.delete({ where: { id: record.id } });
+      }
+    }
+    return { success: true, skipped: true, reason: 'already-sent' };
   }
 
-  // 3. 合规检查
-  const compliance = checkCompliance(templateContent);
+  let sendContent = record.content;
+
+  // 4. 合规检查（兜底安全网：路由已拦截，此处防入队后内容被改等缝隙）
+  const compliance = checkCompliance(sendContent);
   if (!compliance.compliant) {
     console.warn(`${logPrefix} 内容合规拦截: ${compliance.issues.join('；')}`);
 
     // 尝试自动改写
-    const sanitized = generateCompliantVariant(templateContent);
+    const sanitized = generateCompliantVariant(sendContent);
     const sanitizedCheck = checkCompliance(sanitized);
 
     if (!sanitizedCheck.compliant) {
-      // 改写后仍不合规，记录并跳过
+      // 改写后仍不合规，记录失败并跳过（复用同一行，不新增记录）
+      await markRecordFailed(type, record.id);
       await prisma.activity.create({
         data: {
           type: 'ERROR',
           description: `内容合规拦截: ${compliance.issues.join('；')}`,
-          metadata: { commentId, templateId, originalContent: templateContent },
+          metadata: { commentId, recordId, originalContent: record.content },
           userId,
         },
       });
       return { success: false, skipped: true, reason: 'compliance' };
     }
 
-    templateContent = sanitized;
+    sendContent = sanitized;
+    // 落库内容与实发内容保持一致
+    if (type === 'reply') {
+      await prisma.reply.update({ where: { id: record.id }, data: { content: sendContent } });
+    } else {
+      await prisma.dm.update({ where: { id: record.id }, data: { content: sendContent } });
+    }
     console.log(`${logPrefix} 内容已自动改写为合规变体`);
   }
 
-  // 4. 选择发送账号
+  // 5. 选择发送账号并原子认领当日额度（显式指定账号同样走认领，口径一致）
   const account = accountId
-    ? await prisma.senderAccount.findUnique({ where: { id: accountId } })
+    ? await claimAccountSlot(accountId)
     : await pickAccount({ userId, platform });
 
   if (!account) {
@@ -235,7 +269,7 @@ export async function processSendJob(
 
   console.log(`${logPrefix} 使用账号: ${account.label} (健康度: ${account.healthScore})`);
 
-  // 5. 检查是否在安全发送窗口
+  // 6. 检查是否在安全发送窗口
   // WHY: getNextSafeSendTime() 在安全窗口内也会返回 5-30 分钟后的时间（拟人抖动），
   // 这部分抖动已由入队时的 delay 与 Bull limiter 覆盖，若按返回值直接推迟，
   // 每条消息都会被无谓地二次延迟 5-30 分钟。因此用 isSafeSendTime() 判断窗口，
@@ -261,7 +295,7 @@ export async function processSendJob(
     }
   }
 
-  // 6. 执行发送
+  // 7. 执行发送
   const provider = getSenderProvider(platform);
   if (!provider) {
     throw new Error(`不支持的平台: ${platform}`);
@@ -272,7 +306,7 @@ export async function processSendJob(
     platform,
     videoUrl: comment.video.url,
     commentId,
-    content: templateContent,
+    content: sendContent,
     authorName: comment.authorName,
     commentContent: comment.content,
     credentials: {
@@ -287,32 +321,23 @@ export async function processSendJob(
     ? await provider.sendReply(sendParams)
     : await provider.sendDm(sendParams);
 
-  // 7. 结果处理
+  // 8. 结果处理：复用入队时创建的同一行，成功/失败都只更新不新建
   if (result.success) {
     await handleSendSuccess(account.id);
 
-    // 记录发送结果
     if (type === 'reply') {
-      await prisma.reply.create({
-        data: {
-          content: templateContent,
-          status: 'SENT',
-          sentAt: new Date(),
-          commentId,
-        },
+      await prisma.reply.update({
+        where: { id: record.id },
+        data: { status: 'SENT', sentAt: new Date() },
       });
       await prisma.comment.update({
         where: { id: commentId },
         data: { status: 'REPLIED' },
       });
     } else {
-      await prisma.dm.create({
-        data: {
-          content: templateContent,
-          status: 'SENT',
-          sentAt: new Date(),
-          commentId,
-        },
+      await prisma.dm.update({
+        where: { id: record.id },
+        data: { status: 'SENT', sentAt: new Date() },
       });
       await prisma.comment.update({
         where: { id: commentId },
@@ -324,10 +349,16 @@ export async function processSendJob(
     await prisma.activity.create({
       data: {
         type: type === 'reply' ? 'REPLY_SENT' : 'DM_SENT',
-        description: `${type === 'reply' ? '回复' : '私信'}发送成功`,
+        description:
+          type === 'dm'
+            ? `私信了用户 ${comment.authorName}`
+            : mode === 'seed'
+              ? `种草回复了用户 ${comment.authorName}`
+              : `回复了用户 ${comment.authorName}`,
         metadata: {
           commentId,
-          templateId,
+          recordId,
+          mode,
           accountId: account.id,
           accountLabel: account.label,
         },
@@ -345,24 +376,8 @@ export async function processSendJob(
     error: result.error ?? '未知错误',
   });
 
-  // 记录失败
-  if (type === 'reply') {
-    await prisma.reply.create({
-      data: {
-        content: templateContent,
-        status: 'FAILED',
-        commentId,
-      },
-    });
-  } else {
-    await prisma.dm.create({
-      data: {
-        content: templateContent,
-        status: 'FAILED',
-        commentId,
-      },
-    });
-  }
+  // 复用同一行记录失败，Bull 重试时基于同一行再次尝试
+  await markRecordFailed(type, record.id);
 
   if (shouldCooling) {
     console.warn(`${logPrefix} 账号 ${account.label} 触发熔断，进入冷却`);
@@ -409,7 +424,12 @@ async function initializeQueues(): Promise<QueueState> {
   // 抓取队列
   scrapeQueue.process(async (job) => {
     const { videoId, url } = job.data;
-    return scrapeAndSaveComments(videoId, url);
+    // 只有 Bull 最终一次尝试失败才递增视频连续失败计数，
+    // 避免单周期内的自动重试直接把视频打成 ERROR
+    const attempts = job.opts.attempts ?? 1;
+    return scrapeAndSaveComments(videoId, url, {
+      isFinalAttempt: job.attemptsMade >= attempts - 1,
+    });
   });
 
   // 回复队列
@@ -502,12 +522,12 @@ export async function addScrapeJob(videoId: string, url: string) {
   return { id: 'direct', data: { videoId, url } };
 }
 
-export async function addReplyJob(commentId: string, templateId: string, accountId?: string) {
+export async function addReplyJob(commentId: string, recordId: string, accountId?: string) {
   const state = await getQueueState();
 
   if (state.enabled && state.replyQueue) {
     return state.replyQueue.add(
-      { commentId, templateId, accountId },
+      { commentId, recordId, accountId },
       {
         delay: 30000,
         attempts: 3,
@@ -516,16 +536,26 @@ export async function addReplyJob(commentId: string, templateId: string, account
     );
   }
 
-  console.log('[Queue] Redis not available, reply job skipped');
-  return { id: 'direct', data: { commentId, templateId, accountId } };
+  // Redis 不可用时降级为直接异步执行，避免回复记录永远挂在 PENDING（与 addScrapeJob 降级一致）
+  console.warn('[Queue] Redis not available, executing reply job directly');
+  setTimeout(() => {
+    processSendJob(
+      { data: { commentId, recordId, accountId } } as Bull.Job<SendJobData>,
+      'reply'
+    ).catch((error) => {
+      console.error(`[Queue] Direct reply send failed for comment ${commentId}:`, error);
+    });
+  }, 30000);
+
+  return { id: 'direct', data: { commentId, recordId, accountId } };
 }
 
-export async function addDmJob(commentId: string, templateId: string, accountId?: string) {
+export async function addDmJob(commentId: string, recordId: string, accountId?: string) {
   const state = await getQueueState();
 
   if (state.enabled && state.dmQueue) {
     return state.dmQueue.add(
-      { commentId, templateId, accountId },
+      { commentId, recordId, accountId },
       {
         delay: 60000,
         attempts: 3,
@@ -534,6 +564,16 @@ export async function addDmJob(commentId: string, templateId: string, accountId?
     );
   }
 
-  console.log('[Queue] Redis not available, DM job skipped');
-  return { id: 'direct', data: { commentId, templateId, accountId } };
+  // Redis 不可用时降级为直接异步执行，避免私信记录永远挂在 PENDING
+  console.warn('[Queue] Redis not available, executing DM job directly');
+  setTimeout(() => {
+    processSendJob(
+      { data: { commentId, recordId, accountId } } as Bull.Job<SendJobData>,
+      'dm'
+    ).catch((error) => {
+      console.error(`[Queue] Direct DM send failed for comment ${commentId}:`, error);
+    });
+  }, 60000);
+
+  return { id: 'direct', data: { commentId, recordId, accountId } };
 }

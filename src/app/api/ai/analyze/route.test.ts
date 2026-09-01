@@ -104,6 +104,24 @@ describe('POST /api/ai/analyze', () => {
     expect(updated?.intentKeywords).toEqual(['buy']);
   });
 
+  it('不能更新他人的评论', async () => {
+    const owner = await createUser();
+    const attacker = await createUser();
+    const video = await createVideo(owner.id);
+    const comment = await createComment(video.id, { content: 'I want to buy' });
+    mockSession(attacker.id);
+    const req = new NextRequest('http://localhost:3000/api/ai/analyze', {
+      method: 'POST',
+      body: JSON.stringify({ commentId: comment.id, content: 'I want to buy' }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(404);
+    const unchanged = await prisma.comment.findUnique({ where: { id: comment.id } });
+    expect(unchanged?.status).toBe('NEW');
+    expect(unchanged?.intentScore).toBe(0);
+    expect(vi.mocked(analyzeIntentWithAI)).not.toHaveBeenCalled();
+  });
+
   it('分数低于阈值时保持 NEW 状态', async () => {
     const user = await createUser({ intentScoreThreshold: 4 });
     const video = await createVideo(user.id);
@@ -174,6 +192,18 @@ describe('GET /api/ai/analyze', () => {
     const updated = await prisma.comment.findUnique({ where: { id: comment.id } });
     expect(updated?.status).toBe('ANALYZED');
     expect(updated?.intentScore).toBe(5);
+  });
+
+  it('不能分析他人视频的评论', async () => {
+    const owner = await createUser();
+    const attacker = await createUser();
+    const video = await createVideo(owner.id);
+    await createComment(video.id, { content: 'Secret comment', status: 'NEW' });
+    mockSession(attacker.id);
+    const req = new NextRequest(`http://localhost:3000/api/ai/analyze?videoId=${video.id}`);
+    const res = await GET(req);
+    expect(res.status).toBe(404);
+    expect(vi.mocked(analyzeComments)).not.toHaveBeenCalled();
   });
 
   it('只分析状态为 NEW 的评论', async () => {

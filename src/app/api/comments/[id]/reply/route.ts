@@ -7,7 +7,7 @@ import { findSimilarContent } from '@/lib/safety/dedup';
 import { getRecentOutgoingContents } from '@/lib/safety/recent-content';
 import { generateSeedReply } from '@/lib/ai/seed-reply';
 import { tryDecryptAiApiKey } from '@/lib/encryption';
-import { sendReplyToPlatform } from '@/lib/sender';
+import { addReplyJob } from '@/lib/queue';
 import { checkPlanLimit, PlanType } from '@/lib/plans';
 import { z } from 'zod';
 
@@ -148,7 +148,7 @@ export async function POST(
       );
     }
 
-    // 创建回复记录（初始状态 PENDING）
+    // 创建回复记录（初始状态 PENDING），发送动作异步化：入队后由 worker 经账号池/限流/安全窗口发出
     const reply = await prisma.reply.create({
       data: {
         content: replyContent,
@@ -158,77 +158,48 @@ export async function POST(
       },
     });
 
-    // 尝试发送到平台
-    const sendResult = await sendReplyToPlatform({
-      userId: session.user.id,
-      platform: comment.video.platform,
-      videoUrl: comment.video.url,
-      commentId,
-      authorName: comment.authorName,
-      commentContent: comment.content,
-      content: replyContent,
-    });
-
-    // 根据发送结果更新状态
-    if (sendResult.success) {
-      await prisma.$transaction([
-        prisma.reply.update({
-          where: { id: reply.id },
-          data: { status: 'SENT', sentAt: new Date() },
-        }),
-        prisma.comment.update({
-          where: { id: commentId },
-          data: { status: 'REPLIED' },
-        }),
-      ]);
-
-      await prisma.activity.create({
-        data: {
-          type: 'REPLY_SENT',
-          description: mode === 'seed'
-            ? `种草回复了用户 ${comment.authorName}`
-            : `回复了用户 ${comment.authorName}`,
-          metadata: { commentId, replyId: reply.id, mode },
-          userId: session.user.id,
-        },
-      });
-    } else {
+    try {
+      await addReplyJob(commentId, reply.id);
+    } catch (queueError) {
+      // 入队失败：标记失败并同步报错，避免记录永远挂在 PENDING
+      console.error('Reply enqueue error:', queueError);
       await prisma.reply.update({
         where: { id: reply.id },
         data: { status: 'FAILED' },
       });
-
-      return NextResponse.json(
-        {
-          error: sendResult.error || '发送失败',
-          reply: {
-            id: reply.id,
-            status: 'FAILED',
-          },
-        },
-        { status: 502 }
-      );
+      return NextResponse.json({ error: '发送队列不可用，请稍后重试' }, { status: 503 });
     }
 
-    const updatedReply = await prisma.reply.findUnique({
-      where: { id: reply.id },
+    // 记录入队动作（发送结果由 worker 另行记录）
+    await prisma.activity.create({
+      data: {
+        type: 'REPLY_SENT',
+        description: mode === 'seed'
+          ? `种草回复已加入发送队列（用户 ${comment.authorName}）`
+          : `回复已加入发送队列（用户 ${comment.authorName}）`,
+        metadata: { commentId, replyId: reply.id, mode, queued: true },
+        userId: session.user.id,
+      },
     });
 
-    return NextResponse.json({
-      success: true,
-      reply: {
-        id: updatedReply!.id,
-        content: updatedReply!.content,
-        status: updatedReply!.status,
-        mode: updatedReply!.mode,
-        sentAt: updatedReply!.sentAt?.toISOString(),
+    return NextResponse.json(
+      {
+        queued: true,
+        reply: {
+          id: reply.id,
+          content: reply.content,
+          status: reply.status,
+          mode: reply.mode,
+          sentAt: reply.sentAt?.toISOString(),
+        },
+        dedup: {
+          maxSimilarity: similarity.maxScore,
+          generated,
+          regenerateAttempts: generated ? regenerateAttempts : 0,
+        },
       },
-      dedup: {
-        maxSimilarity: similarity.maxScore,
-        generated,
-        regenerateAttempts: generated ? regenerateAttempts : 0,
-      },
-    });
+      { status: 202 }
+    );
   } catch (error) {
     console.error('Reply comment error:', error);
     return NextResponse.json({ error: '回复失败，请稍后重试' }, { status: 500 });

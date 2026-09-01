@@ -111,6 +111,9 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<SenderAccount[]>([]);
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("ALL");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // 重试计数：点击重试时 +1，驱动下方 effect 重新拉取
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ ...EMPTY_FORM, platform: "DOUYIN" as Platform });
@@ -176,11 +179,15 @@ export default function AccountsPage() {
     let ignore = false;
     fetchAccounts(platformFilter)
       .then((list) => {
-        if (!ignore) setAccounts(list);
+        if (!ignore) {
+          setAccounts(list);
+          setError(null);
+        }
       })
       .catch((error) => {
         if (!ignore) {
           console.error("Fetch sender accounts error:", error);
+          setError(getErrorMessage(error) || "加载账号列表失败");
           addToast(getErrorMessage(error) || "加载账号列表失败", "error");
         }
       })
@@ -190,7 +197,14 @@ export default function AccountsPage() {
     return () => {
       ignore = true;
     };
-  }, [fetchAccounts, platformFilter, addToast]);
+  }, [fetchAccounts, platformFilter, addToast, reloadKey]);
+
+  // 重试：重置状态后触发重新拉取
+  const handleRetry = () => {
+    setError(null);
+    setLoading(true);
+    setReloadKey((k) => k + 1);
+  };
 
   const openEdit = (account?: SenderAccount) => {
     if (account) {
@@ -471,6 +485,18 @@ export default function AccountsPage() {
                 {[1, 2, 3].map((i) => (
                   <Skeleton key={i} className="h-12 w-full rounded-2xl" />
                 ))}
+              </div>
+            ) : error ? (
+              <div className="rounded-2xl bg-red-50 p-4 text-sm text-red-600 flex items-center justify-between gap-4">
+                <span>{error}</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleRetry}
+                  className="rounded-full px-5 py-2 h-auto text-sm flex-shrink-0"
+                >
+                  重试
+                </Button>
               </div>
             ) : accounts.length === 0 ? (
               <div className="text-center py-12 text-gray-400 text-sm">

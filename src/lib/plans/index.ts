@@ -38,20 +38,22 @@ function startOfDay(date = new Date()) {
 export async function getCurrentUsage(userId: string, plan: PlanType) {
   const today = startOfDay();
 
+  // 回复/私信用量口径：数 Reply/Dm 表中今日实际发送成功（SENT）的记录，
+  // 不再数 Activity（批量发送按批次只记 1 条活动，会漏计真实发送量）
   const [videoCount, replyCount, dmCount, aiResearchCount] = await Promise.all([
     prisma.video.count({ where: { userId } }),
-    prisma.activity.count({
+    prisma.reply.count({
       where: {
-        userId,
-        type: 'REPLY_SENT',
-        createdAt: { gte: today },
+        status: 'SENT',
+        sentAt: { gte: today },
+        comment: { video: { userId } },
       },
     }),
-    prisma.activity.count({
+    prisma.dm.count({
       where: {
-        userId,
-        type: 'DM_SENT',
-        createdAt: { gte: today },
+        status: 'SENT',
+        sentAt: { gte: today },
+        comment: { video: { userId } },
       },
     }),
     prisma.aiResearchHistory.count({

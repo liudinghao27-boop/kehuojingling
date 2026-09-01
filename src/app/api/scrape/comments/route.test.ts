@@ -150,6 +150,65 @@ describe('POST /api/scrape/comments', () => {
     const json = await res.json();
     expect(json.comments).toHaveLength(0);
   });
+
+  it('视频数量达到套餐上限时返回 403', async () => {
+    const user = await createUser();
+    // 未设置 plan 时按 FREE 处理，最多 3 个视频
+    for (let i = 0; i < 3; i++) {
+      await createVideo(user.id, { url: `https://douyin.com/video/existing${i}` });
+    }
+    mockSession(user.id);
+    vi.mocked(parseVideoUrl).mockReturnValue({
+      platform: 'DOUYIN',
+      videoId: 'new123',
+      originalUrl: 'https://douyin.com/video/new123',
+    });
+    const req = new NextRequest('http://localhost:3000/api/scrape/comments', {
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://douyin.com/video/new123' }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(403);
+  });
+
+  it('同一用户重复添加相同链接时返回 409', async () => {
+    const user = await createUser();
+    await createVideo(user.id, { url: 'https://douyin.com/video/test123' });
+    mockSession(user.id);
+    vi.mocked(parseVideoUrl).mockReturnValue({
+      platform: 'DOUYIN',
+      videoId: 'test123',
+      originalUrl: 'https://douyin.com/video/test123',
+    });
+    const req = new NextRequest('http://localhost:3000/api/scrape/comments', {
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://douyin.com/video/test123' }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain('该视频已添加');
+  });
+
+  it('其他用户已添加相同链接时不视为重复', async () => {
+    const owner = await createUser();
+    await createVideo(owner.id, { url: 'https://douyin.com/video/test123' });
+    const user = await createUser();
+    mockSession(user.id);
+    vi.mocked(parseVideoUrl).mockReturnValue({
+      platform: 'DOUYIN',
+      videoId: 'test123',
+      originalUrl: 'https://douyin.com/video/test123',
+    });
+    vi.mocked(scrapeCommentsReal).mockResolvedValue([]);
+    vi.mocked(analyzeComments).mockResolvedValue([]);
+    const req = new NextRequest('http://localhost:3000/api/scrape/comments', {
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://douyin.com/video/test123' }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+  });
 });
 
 describe('GET /api/scrape/comments', () => {
@@ -171,6 +230,17 @@ describe('GET /api/scrape/comments', () => {
     const req = new NextRequest('http://localhost:3000/api/scrape/comments');
     const res = await GET(req);
     expect(res.status).toBe(400);
+  });
+
+  it('不能读取他人视频的评论', async () => {
+    const owner = await createUser();
+    const attacker = await createUser();
+    const video = await createVideo(owner.id);
+    await createComment(video.id, { content: 'Secret comment' });
+    mockSession(attacker.id);
+    const req = new NextRequest(`http://localhost:3000/api/scrape/comments?videoId=${video.id}`);
+    const res = await GET(req);
+    expect(res.status).toBe(404);
   });
 
   it('返回指定视频的评论', async () => {

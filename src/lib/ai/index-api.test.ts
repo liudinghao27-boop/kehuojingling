@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   mockIndexProvider,
   baiduIndexProvider,
@@ -124,5 +124,41 @@ describe('createCompositeIndexProvider', () => {
     const result = await composite.fetch(['测试']);
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe('mock');
+  });
+});
+
+describe('callIndexApi 超时控制', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('真实指数请求携带超时信号', async () => {
+    vi.stubEnv('BAIDU_INDEX_API_KEY', 'test-key');
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
+
+    await baiduIndexProvider.fetch(['关键词']);
+
+    const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal?.aborted).toBe(false);
+  });
+
+  it('请求超时时返回空数组并给出友好提示', async () => {
+    vi.stubEnv('BAIDU_INDEX_API_KEY', 'test-key');
+    const timeoutError = new Error('The operation timed out');
+    timeoutError.name = 'TimeoutError';
+    vi.mocked(fetch).mockRejectedValue(timeoutError);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await baiduIndexProvider.fetch(['关键词']);
+
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('超时'));
+    warnSpy.mockRestore();
   });
 });

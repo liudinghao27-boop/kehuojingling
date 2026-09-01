@@ -95,7 +95,6 @@ export default function AiAssistantPage() {
 
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [historyTags, setHistoryTags] = useState<Record<string, string>>({});
   const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -113,18 +112,6 @@ export default function AiAssistantPage() {
     const data = await res.json();
     return (data.items || []).map((item: { keyword: string }) => item.keyword);
   }, []);
-
-  const fetchHistory = useCallback(async () => {
-    setLoadingHistory(true);
-    try {
-      const items = await fetchHistoryData();
-      setHistory(items);
-    } catch (error) {
-      console.error("Fetch history error:", error);
-    } finally {
-      setLoadingHistory(false);
-    }
-  }, [fetchHistoryData]);
 
   useEffect(() => {
     let ignore = false;
@@ -213,50 +200,6 @@ export default function AiAssistantPage() {
       addToast(getErrorMessage(error) || "网页研究失败", "error");
     } finally {
       setLoadingResearch(false);
-    }
-  };
-
-  const handleSaveHistory = async () => {
-    if (!keywordResult && !researchResult) {
-      addToast("没有可保存的研究结果", "error");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const res = await fetch("/api/ai/history", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: industry.trim() || url.trim() || undefined,
-          industry: industry.trim() || undefined,
-          url: url.trim() || undefined,
-          combinedSearchQueries: keywordResult?.combinedSearchQueries || [],
-          coreKeywords: keywordResult?.coreKeywords || [],
-          longTailKeywords: keywordResult?.longTailKeywords || [],
-          painPoints: keywordResult?.painPoints || [],
-          competitorAccounts: keywordResult?.competitorAccounts || [],
-          searchCommands: keywordResult?.searchCommands || {},
-          scoredKeywords: keywordResult?.scoredKeywords || [],
-          researchSummary: researchResult?.summary || undefined,
-          researchHotTopics: researchResult?.hotTopics || [],
-          researchPainPoints: researchResult?.painPoints || [],
-          researchCompetitors: researchResult?.competitorAccounts || [],
-          researchKeywords: researchResult?.keywords || [],
-          tags: [],
-          isFavorite: false,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "保存失败");
-      }
-      addToast("已保存到历史记录", "success");
-      fetchHistory();
-    } catch (error) {
-      addToast(getErrorMessage(error) || "保存历史记录失败", "error");
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -702,14 +645,7 @@ export default function AiAssistantPage() {
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900">研究结果</h2>
               <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={handleSaveHistory}
-                  disabled={saving}
-                  className="rounded-full px-5 py-2 h-auto text-sm"
-                >
-                  {saving ? "保存中..." : "保存到历史"}
-                </Button>
+                {/* 历史记录由关键词/研究接口自动落库，无需手动保存，避免双写 */}
                 <Button
                   variant="secondary"
                   onClick={exportToCSV}

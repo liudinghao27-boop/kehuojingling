@@ -7,8 +7,7 @@ import { findSimilarContent } from '@/lib/safety/dedup';
 import { getRecentOutgoingContents } from '@/lib/safety/recent-content';
 import { generateSeedReply } from '@/lib/ai/seed-reply';
 import { tryDecryptAiApiKey } from '@/lib/encryption';
-import { sendReplyToPlatform } from '@/lib/sender';
-import { randomDelay } from '@/lib/sender/utils';
+import { addReplyJob } from '@/lib/queue';
 import { checkPlanLimit, PlanType } from '@/lib/plans';
 import { z } from 'zod';
 
@@ -146,19 +145,13 @@ export async function POST(req: NextRequest) {
       industryContext = user?.industryContext;
     }
 
-    // 逐条处理：先生成内容（种草模式），再创建记录并发送
-    const now = new Date();
-    let successCount = 0;
+    // 逐条处理：种草模式先生成差异化内容，再落 PENDING 行并入队；
+    // 发送动作由 worker 异步执行（账号池轮换/限流/安全窗口在队列侧生效）
+    let queuedCount = 0;
     let failedCount = 0;
-    let skippedCount = 0;
-    let consecutiveFailures = 0;
-    let stopped = false;
-    const sentCommentIds: string[] = [];
     const batchGenerated: string[] = []; // 本批次已生成内容，批内也要互查重
 
-    for (let i = 0; i < comments.length; i++) {
-      const comment = comments[i];
-
+    for (const comment of comments) {
       let replyContent: string;
       let mode: 'seed' | null = null;
 
@@ -182,17 +175,11 @@ export async function POST(req: NextRequest) {
         const compliance = checkCompliance(candidate);
         if (!compliance.compliant) {
           failedCount++;
-          consecutiveFailures++;
-          if (consecutiveFailures >= 3) {
-            stopped = true;
-            skippedCount = comments.length - i - 1;
-            break;
-          }
           continue;
         }
         replyContent = candidate;
         mode = 'seed';
-        // 生成内容一经确定即计入批内查重（即使后续发送失败），保证同批不撞车
+        // 生成内容一经确定即计入批内查重，保证同批不撞车
         batchGenerated.push(candidate);
       } else {
         replyContent = sharedContent!;
@@ -207,70 +194,41 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      await randomDelay(3000, 6000);
-
-      const sendResult = await sendReplyToPlatform({
-        userId: session.user.id,
-        platform: comment.video.platform,
-        videoUrl: comment.video.url,
-        commentId: comment.id,
-        authorName: comment.authorName,
-        commentContent: comment.content,
-        content: replyContent,
-      });
-
-      if (sendResult.success) {
-        successCount++;
-        consecutiveFailures = 0;
-        sentCommentIds.push(comment.id);
-        await prisma.reply.update({
-          where: { id: reply.id },
-          data: { status: 'SENT', sentAt: now },
-        });
-      } else {
-        failedCount++;
-        consecutiveFailures++;
+      try {
+        await addReplyJob(comment.id, reply.id);
+        queuedCount++;
+      } catch (queueError) {
+        // 单条入队失败不阻塞整批：标记该条 FAILED，其余继续
+        console.error(`Batch reply enqueue error for comment ${comment.id}:`, queueError);
         await prisma.reply.update({
           where: { id: reply.id },
           data: { status: 'FAILED' },
         });
-
-        if (consecutiveFailures >= 3) {
-          stopped = true;
-          skippedCount = comments.length - i - 1;
-          break;
-        }
+        failedCount++;
       }
     }
 
-    // 只有发送成功的评论才更新为 REPLIED
-    if (sentCommentIds.length > 0) {
-      await prisma.comment.updateMany({
-        where: { id: { in: sentCommentIds } },
-        data: { status: 'REPLIED' },
-      });
-    }
-
-    // 记录活动
+    // 记录入队动作（每条发送结果由 worker 另行记录）
     await prisma.activity.create({
       data: {
         type: 'REPLY_SENT',
         description: generate
-          ? `种草回复了 ${successCount} 位用户（每条差异化生成），${failedCount} 位失败，${skippedCount} 位跳过`
-          : `批量回复了 ${successCount} 位用户，${failedCount} 位失败，${skippedCount} 位因风控未发送`,
-        metadata: { commentIds, successCount, failedCount, skippedCount, stopped, mode: generate ? 'seed' : null },
+          ? `已将 ${queuedCount} 条种草回复加入发送队列（每条差异化生成）${failedCount > 0 ? `，${failedCount} 条未入队` : ''}`
+          : `已将 ${queuedCount} 条回复加入发送队列${failedCount > 0 ? `，${failedCount} 条未入队` : ''}`,
+        metadata: { commentIds, queuedCount, failedCount, mode: generate ? 'seed' : null, queued: true },
         userId: session.user.id,
       },
     });
 
-    return NextResponse.json({
-      success: true,
-      count: successCount,
-      failed: failedCount,
-      skipped: skippedCount,
-      stopped,
-      mode: generate ? 'seed' : null,
-    });
+    return NextResponse.json(
+      {
+        queued: true,
+        count: queuedCount,
+        failed: failedCount,
+        mode: generate ? 'seed' : null,
+      },
+      { status: 202 }
+    );
   } catch (error) {
     console.error('Batch reply error:', error);
     return NextResponse.json({ error: '批量回复失败，请稍后重试' }, { status: 500 });

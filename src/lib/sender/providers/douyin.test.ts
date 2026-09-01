@@ -418,6 +418,56 @@ describe('douyinProvider', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('未配置抖音 Cookie');
     });
+
+    it('发送后聊天窗口未出现私信文本时返回失败', async () => {
+      const page = createFakePage({
+        urlValue: 'https://www.douyin.com/video/123',
+        locators: {
+          'text=最新': createFakeLocator({ visible: false }),
+          [`[data-douyin-sender-`]: createFakeLocator({ visible: true }),
+          [`[data-douyin-sender-author-`]: createFakeLocator({ visible: true }),
+          'textarea, [contenteditable="true"]': createFakeLocator({ visible: true }),
+        },
+        evaluateSequence: [
+          null, // detectAuthDialog
+          undefined, // prepareCommentSection scroll
+          true, // findCommentByJs: found
+          true, // dmClicked
+          true, // sendClicked
+          false, // verifyDmSent 第 1 次轮询：未出现（后续轮询同样未出现）
+        ],
+      });
+      setupLaunchMock(page);
+
+      const result = await douyinProvider.sendDm(dmParams);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('未在聊天窗口检测到私信内容');
+    });
+
+    it('私信文本延迟上屏时轮询后仍判定成功', async () => {
+      const page = createFakePage({
+        urlValue: 'https://www.douyin.com/video/123',
+        locators: {
+          'text=最新': createFakeLocator({ visible: false }),
+          [`[data-douyin-sender-`]: createFakeLocator({ visible: true }),
+          [`[data-douyin-sender-author-`]: createFakeLocator({ visible: true }),
+          'textarea, [contenteditable="true"]': createFakeLocator({ visible: true }),
+        },
+        evaluateSequence: [
+          null, // detectAuthDialog
+          undefined, // prepareCommentSection scroll
+          true, // findCommentByJs: found
+          true, // dmClicked
+          true, // sendClicked
+          false, // verifyDmSent 第 1 次轮询：未出现
+          true, // verifyDmSent 第 2 次轮询：已出现
+        ],
+      });
+      setupLaunchMock(page);
+
+      const result = await douyinProvider.sendDm(dmParams);
+      expect(result.success).toBe(true);
+    });
   });
 
   describe('proxy 与指纹选项', () => {

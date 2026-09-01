@@ -54,14 +54,14 @@ describe('getScraperApiUrl', () => {
     vi.unstubAllEnvs();
   });
 
-  it('SCRAPER_API_URL 为空时默认走代理', () => {
+  it('未配置 SCRAPER_API_URL 时抛出配置指引错误', () => {
     vi.stubEnv('SCRAPER_API_URL', '');
-    expect(getScraperApiUrl()).toBe('http://localhost:3000/api/scraper');
+    expect(() => getScraperApiUrl()).toThrow(/SCRAPER_API_URL/);
   });
 
-  it('SCRAPER_API_URL 为 /api/scraper 时走代理', () => {
+  it('SCRAPER_API_URL 为 /api/scraper 时抛出配置指引错误（服务端自调代理必 401）', () => {
     vi.stubEnv('SCRAPER_API_URL', '/api/scraper');
-    expect(getScraperApiUrl()).toBe('http://localhost:3000/api/scraper');
+    expect(() => getScraperApiUrl()).toThrow(/SCRAPER_API_URL/);
   });
 
   it('SCRAPER_API_URL 为 http:// 时直连', () => {
@@ -81,7 +81,6 @@ describe('scrapeCommentsReal', () => {
   });
 
   it('代理模式下请求路径不包含 /api 前缀', async () => {
-    vi.stubEnv('SCRAPER_API_URL', '/api/scraper');
     const mockFetch = vi.mocked(fetch);
     mockFetch
       .mockResolvedValueOnce(
@@ -92,7 +91,8 @@ describe('scrapeCommentsReal', () => {
       );
 
     const parsed = parseVideoUrl('https://www.douyin.com/video/123')!;
-    await scrapeCommentsReal(parsed);
+    // 显式传入完整代理地址（服务端不再默认走 /api/scraper 代理）
+    await scrapeCommentsReal(parsed, 'http://localhost:3000/api/scraper');
 
     const hybridUrl = mockFetch.mock.calls[0][0] as string;
     const commentsUrl = mockFetch.mock.calls[1][0] as string;
@@ -120,5 +120,37 @@ describe('scrapeCommentsReal', () => {
     const commentsUrl = mockFetch.mock.calls[1][0] as string;
     expect(hybridUrl).toContain('http://localhost:8000/api/hybrid/video_data?');
     expect(commentsUrl).toContain('http://localhost:8000/api/douyin/web/fetch_video_comments?');
+  });
+
+  it('两次请求都携带超时信号', async () => {
+    vi.stubEnv('SCRAPER_API_URL', 'http://localhost:8000');
+    const mockFetch = vi.mocked(fetch);
+    mockFetch
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { aweme_id: '123' } }), { status: 200 })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { comments: [] } }), { status: 200 })
+      );
+
+    const parsed = parseVideoUrl('https://www.douyin.com/video/123')!;
+    await scrapeCommentsReal(parsed);
+
+    for (const call of mockFetch.mock.calls) {
+      const signal = (call[1] as RequestInit).signal;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal?.aborted).toBe(false);
+    }
+  });
+
+  it('抓取服务超时时抛出友好错误信息', async () => {
+    vi.stubEnv('SCRAPER_API_URL', 'http://localhost:8000');
+    const mockFetch = vi.mocked(fetch);
+    const timeoutError = new Error('The operation timed out');
+    timeoutError.name = 'TimeoutError';
+    mockFetch.mockRejectedValue(timeoutError);
+
+    const parsed = parseVideoUrl('https://www.douyin.com/video/123')!;
+    await expect(scrapeCommentsReal(parsed)).rejects.toThrow(/超时/);
   });
 });

@@ -93,8 +93,12 @@ export default function DashboardPage() {
   const [funnel, setFunnel] = useState<FunnelStep[]>([]);
   const [activities, setActivities] = useState<{ id: string; type: string; description: string; createdAt: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // 重试计数：点击重试时 +1，驱动下方 effect 重新拉取
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    let ignore = false;
     Promise.all([
       fetch('/api/videos'),
       fetch('/api/comments?intent=high'),
@@ -102,33 +106,52 @@ export default function DashboardPage() {
       fetch('/api/activities'),
     ])
       .then(async ([videosRes, commentsRes, statsRes, activitiesRes]) => {
+        if (!videosRes.ok || !commentsRes.ok || !statsRes.ok || !activitiesRes.ok) {
+          throw new Error('获取数据失败');
+        }
         const videosData = await videosRes.json();
         const commentsData = await commentsRes.json();
         const statsData = await statsRes.json();
         const activitiesData = await activitiesRes.json();
-        setVideos(videosData.videos || []);
-        setHighIntentUsers(
-          (commentsData.comments || []).slice(0, 5).map((comment: ApiComment) => ({
-            id: comment.id,
-            name: comment.authorName,
-            comment: comment.content,
-            score: comment.intentScore,
-            time: formatRelativeTime(comment.createdAt),
-            avatar: comment.authorName[0] || '?',
-          }))
-        );
-        setStats(statsData.stats || { videos: 0, comments: 0, highIntent: 0, replies: 0, dms: 0, converted: 0 });
-        setFunnel(statsData.funnel || []);
-        setActivities(activitiesData.items || []);
+        if (!ignore) {
+          setVideos(videosData.videos || []);
+          setHighIntentUsers(
+            (commentsData.comments || []).slice(0, 5).map((comment: ApiComment) => ({
+              id: comment.id,
+              name: comment.authorName,
+              comment: comment.content,
+              score: comment.intentScore,
+              time: formatRelativeTime(comment.createdAt),
+              avatar: comment.authorName[0] || '?',
+            }))
+          );
+          setStats(statsData.stats || { videos: 0, comments: 0, highIntent: 0, replies: 0, dms: 0, converted: 0 });
+          setFunnel(statsData.funnel || []);
+          setActivities(activitiesData.items || []);
+          setError(null);
+        }
       })
       .catch((error) => {
-        console.error('Fetch dashboard error:', error);
-        addToast('获取数据失败', 'error');
+        if (!ignore) {
+          console.error('Fetch dashboard error:', error);
+          setError('获取数据失败');
+          addToast('获取数据失败', 'error');
+        }
       })
       .finally(() => {
-        setLoading(false);
+        if (!ignore) setLoading(false);
       });
-  }, [addToast]);
+    return () => {
+      ignore = true;
+    };
+  }, [addToast, reloadKey]);
+
+  // 重试：重置状态后触发重新拉取
+  const handleRetry = () => {
+    setError(null);
+    setLoading(true);
+    setReloadKey((k) => k + 1);
+  };
 
   const statCards = [
     { label: "监控视频", value: String(stats.videos), change: "+0" },
@@ -151,6 +174,21 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-2 text-lg text-gray-400">今日获客概览</p>
         </div>
+
+        {/* 加载失败：错误态优先于各区块空态 */}
+        {error && (
+          <div className="mb-12 rounded-2xl bg-red-50 p-4 text-sm text-red-600 flex items-center justify-between gap-4">
+            <span>{error}</span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRetry}
+              className="rounded-full px-5 py-2 h-auto text-sm flex-shrink-0"
+            >
+              重试
+            </Button>
+          </div>
+        )}
 
         {/* Stats Grid - Apple Style */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
@@ -187,7 +225,7 @@ export default function DashboardPage() {
                       <Skeleton key={i} className="h-20 w-full rounded-2xl" />
                     ))}
                   </div>
-                ) : recentVideos.length === 0 ? (
+                ) : error ? null : recentVideos.length === 0 ? (
                   <div className="text-center py-12">
                     <p className="text-sm text-gray-400">暂无监控视频</p>
                     <Link href="/dashboard/videos" className="text-sm text-gray-900 hover:text-gray-600 mt-2 inline-block">
@@ -242,7 +280,7 @@ export default function DashboardPage() {
                       <Skeleton key={i} className="h-20 w-full rounded-2xl" />
                     ))}
                   </div>
-                ) : highIntentUsers.length === 0 ? (
+                ) : error ? null : highIntentUsers.length === 0 ? (
                   <div className="text-center py-12">
                     <p className="text-sm text-gray-400">暂无高意向用户</p>
                     <Link href="/dashboard/videos" className="text-sm text-gray-900 hover:text-gray-600 mt-2 inline-block">
@@ -296,7 +334,7 @@ export default function DashboardPage() {
                       <Skeleton key={i} className="h-10 w-full rounded-xl" />
                     ))}
                   </div>
-                ) : funnel.length === 0 ? (
+                ) : error ? null : funnel.length === 0 ? (
                   <div className="text-center py-12 text-sm text-gray-400">暂无数据</div>
                 ) : (
                   <div className="space-y-5">
@@ -353,7 +391,7 @@ export default function DashboardPage() {
                       <Skeleton key={i} className="h-10 w-full rounded-xl" />
                     ))}
                   </div>
-                ) : activities.length === 0 ? (
+                ) : error ? null : activities.length === 0 ? (
                   <div className="text-center py-8 text-sm text-gray-400">暂无动态</div>
                 ) : (
                   <div className="space-y-4">

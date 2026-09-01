@@ -41,8 +41,27 @@ export interface AccountRecoverySchedule {
 // ---------------------------------------------------------------------------
 
 /**
- * 选择最优发送账号。
- * 策略：健康度 > 剩余额度 > 最久未使用。
+ * 原子认领指定账号的当日发送额度。
+ * 条件 updateMany：账号可用（ACTIVE）且 dailySent < dailyLimit 时才认领成功，
+ * 并发下不会超额占用；认领失败（状态/额度已变化）返回 null。
+ */
+export async function claimAccountSlot(accountId: string): Promise<SenderAccount | null> {
+  const claimed = await prisma.senderAccount.updateMany({
+    where: {
+      id: accountId,
+      status: AccountStatus.ACTIVE,
+      dailySent: { lt: prisma.senderAccount.fields.dailyLimit },
+    },
+    data: { dailySent: { increment: 1 } },
+  });
+
+  if (claimed.count === 0) return null;
+  return prisma.senderAccount.findUnique({ where: { id: accountId } });
+}
+
+/**
+ * 选择最优发送账号并原子认领其当日额度。
+ * 策略：健康度 > 剩余额度 > 最久未使用；认领失败（并发抢占）换下一个候选。
  */
 export async function pickAccount(options: PickAccountOptions): Promise<SenderAccount | null> {
   const {
@@ -52,7 +71,7 @@ export async function pickAccount(options: PickAccountOptions): Promise<SenderAc
     excludeAccountIds = [],
   } = options;
 
-  const accounts = await prisma.senderAccount.findMany({
+  const candidates = await prisma.senderAccount.findMany({
     where: {
       userId,
       platform,
@@ -66,10 +85,15 @@ export async function pickAccount(options: PickAccountOptions): Promise<SenderAc
       { lastSuccessAt: 'asc' },
       { dailySent: 'asc' },
     ],
-    take: 1,
   });
 
-  return accounts[0] ?? null;
+  // 逐个候选做条件原子认领，认领失败说明并发下额度/状态已变，换下一个
+  for (const candidate of candidates) {
+    const claimed = await claimAccountSlot(candidate.id);
+    if (claimed) return claimed;
+  }
+
+  return null;
 }
 
 /**
@@ -124,29 +148,38 @@ export async function handleSendFailure(context: SendFailureContext): Promise<{
 }> {
   const { accountId, error, isRiskControl = isRiskControlError(error) } = context;
 
-  const account = await prisma.senderAccount.findUnique({
+  const existing = await prisma.senderAccount.findUnique({
     where: { id: accountId },
   });
 
-  if (!account) {
+  if (!existing) {
     throw new Error(`账号不存在: ${accountId}`);
   }
 
   // 健康度扣分：风控 -20，普通失败 -5
+  // 原子 decrement/increment，避免并发读改写互相覆盖；随后边界钳制到 [0, 100]
   const scoreDelta = isRiskControl ? 20 : 5;
-  const newScore = Math.max(0, account.healthScore - scoreDelta);
-  const newFailCount = account.failCount + 1;
+  await prisma.senderAccount.update({
+    where: { id: accountId },
+    data: {
+      healthScore: { decrement: scoreDelta },
+      failCount: { increment: 1 },
+      lastFailAt: new Date(),
+    },
+  });
+  await prisma.senderAccount.updateMany({
+    where: { id: accountId, healthScore: { lt: 0 } },
+    data: { healthScore: 0 },
+  });
 
-  // 熔断条件：连续失败 3 次，或健康度低于 30
-  const shouldCooling = newFailCount >= 3 || newScore < 30;
+  // 重新读取最新计数做熔断判断：连续失败 3 次，或健康度低于 30
+  const current = await prisma.senderAccount.findUniqueOrThrow({ where: { id: accountId } });
+  const shouldCooling = current.failCount >= 3 || current.healthScore < 30;
   const recoveryDelayMs = 2 * 60 * 60 * 1000; // 2 小时
 
   const updated = await prisma.senderAccount.update({
     where: { id: accountId },
     data: {
-      healthScore: newScore,
-      failCount: newFailCount,
-      lastFailAt: new Date(),
       status: shouldCooling ? AccountStatus.COOLING : AccountStatus.ACTIVE,
     },
   });
@@ -158,24 +191,24 @@ export async function handleSendFailure(context: SendFailureContext): Promise<{
       description: `发送失败${isRiskControl ? '（风控）' : ''}: ${error}`,
       metadata: {
         accountId,
-        accountLabel: account.label,
-        platform: account.platform,
-        healthScore: newScore,
-        failCount: newFailCount,
+        accountLabel: existing.label,
+        platform: existing.platform,
+        healthScore: updated.healthScore,
+        failCount: updated.failCount,
         shouldCooling,
       },
-      userId: account.userId,
+      userId: existing.userId,
     },
   });
 
   // 触发冷却时推送告警（sendAlert 内部已兜底，不会抛错）
   if (shouldCooling) {
     const alert = buildAccountCoolingAlert(
-      account.label,
-      account.platform,
-      `连续失败 ${newFailCount} 次，健康度降至 ${newScore}（最近错误：${error}）`
+      existing.label,
+      existing.platform,
+      `连续失败 ${updated.failCount} 次，健康度降至 ${updated.healthScore}（最近错误：${error}）`
     );
-    await sendAlert(account.userId, alert.title, alert.content);
+    await sendAlert(existing.userId, alert.title, alert.content);
   }
 
   return { account: updated, shouldCooling, recoveryDelayMs };
@@ -183,28 +216,32 @@ export async function handleSendFailure(context: SendFailureContext): Promise<{
 
 /**
  * 处理发送成功，恢复账号健康度。
+ * 注意：dailySent 已在 pickAccount/claimAccountSlot 认领时原子扣减，这里不重复计数。
  */
 export async function handleSendSuccess(accountId: string): Promise<SenderAccount> {
-  const account = await prisma.senderAccount.findUnique({
+  const existing = await prisma.senderAccount.findUnique({
     where: { id: accountId },
   });
 
-  if (!account) {
+  if (!existing) {
     throw new Error(`账号不存在: ${accountId}`);
   }
 
-  // 成功回血 +2，上限 100
-  const newScore = Math.min(100, account.healthScore + 2);
-
-  return prisma.senderAccount.update({
+  // 成功回血 +2：原子 increment，随后钳制上限 100
+  await prisma.senderAccount.update({
     where: { id: accountId },
     data: {
-      healthScore: newScore,
+      healthScore: { increment: 2 },
       failCount: 0,
       lastSuccessAt: new Date(),
-      dailySent: { increment: 1 },
     },
   });
+  await prisma.senderAccount.updateMany({
+    where: { id: accountId, healthScore: { gt: 100 } },
+    data: { healthScore: 100 },
+  });
+
+  return prisma.senderAccount.findUniqueOrThrow({ where: { id: accountId } });
 }
 
 /**

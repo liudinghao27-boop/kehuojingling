@@ -21,6 +21,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '缺少评论内容' }, { status: 400 });
     }
 
+    // 归属校验放在 AI 调用之前，避免为越权请求消耗配额
+    if (commentId) {
+      const owned = await prisma.comment.findFirst({
+        where: { id: commentId, video: { userId: session.user.id } },
+        select: { id: true },
+      });
+      if (!owned) {
+        return NextResponse.json({ error: '评论不存在' }, { status: 404 });
+      }
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
       select: { aiApiKey: true, industryContext: true, intentScoreThreshold: true },
@@ -83,6 +94,15 @@ export async function GET(req: NextRequest) {
 
     if (!videoId) {
       return NextResponse.json({ error: '缺少视频ID' }, { status: 400 });
+    }
+
+    // 归属校验：只能分析自己视频下的评论
+    const ownedVideo = await prisma.video.findFirst({
+      where: { id: videoId, userId: session.user.id },
+      select: { id: true },
+    });
+    if (!ownedVideo) {
+      return NextResponse.json({ error: '视频不存在' }, { status: 404 });
     }
 
     const user = await prisma.user.findUnique({
