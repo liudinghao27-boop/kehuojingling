@@ -34,6 +34,7 @@
 | `AI_API_KEY_ENCRYPTION_KEY` | 见 secrets 文件 |
 | `SENDER_PROVIDER` | 试用初期 `mock`（只记录不真发）；真实发送改 `real` |
 | `SCRAPER_API_URL` | 抓取服务隧道域名（见「四」，隧道重启后需更新并重启应用） |
+| `TIKHUB_API_KEY` | 抖音评论抓取主数据源（见 secrets 文件；不配则回退自建爬虫。2026-09-07 起经 kubectl set env 注入——**在 Sealos UI 编辑环境变量时务必保留此项**，UI 全量覆盖会把它冲掉） |
 
 改环境变量保存后应用会自动重建部署。
 
