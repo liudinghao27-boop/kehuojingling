@@ -64,11 +64,32 @@
 
 ```bash
 npm run dev:all    # Next.js + 抓取服务（本机内存小，不要启 Docker Desktop）
-npm test           # 测试；TEST_DATABASE_URL 可指向云端测试库
+# 测试用云端 Neon 测试库（vitest 不会自动加载 .env.test，必须先 export）：
+export TEST_DATABASE_URL=$(grep '^TEST_DATABASE_URL=' .env.test | cut -d= -f2- | tr -d "\"'")
+npm test
 ```
 
 > ⚠️ 本机启 Docker Desktop 会导致系统卡死重启，本地开发数据库请用 `TEST_DATABASE_URL` 指向云端测试库。
 
-## 八、安全提醒
+## 八、VPN 边界（商业部署要求：运行时必须全程无 VPN）
+
+**运行时链路全部境内直连，2026-09-07 从 Sealos pod 实测**：
+
+| 链路 | 结果 | 说明 |
+|------|------|------|
+| pod → ghcr.io | ✅ 401（registry 正常，401 是未带 token 的标准响应） | 镜像拉取无代理依赖 |
+| pod → api.tikhub.io | ✅ 200（~1-2s） | TikHub 对境内直连友好，无需代理 |
+| pod → www.douyin.com | ✅ 200（0.16s） | 境内 |
+| pod → PG/Redis | ✅ 内网 | — |
+
+**仅开发侧 GitHub（push / Actions / 网页）受墙影响**，本机三条通道按序使用：
+
+1. `git push` 直连（波动，时通时断；注意本机需 `git -c http.sslBackend=openssl push`）
+2. 直连被墙时：`node scripts/debug/api_push.mjs`（走 api.github.com Git Data API，历史上直连可用）
+3. 开 VPN 时：仓库已配 `http.https://github.com.proxy=http://127.0.0.1:10808`（仅 github.com 走代理，不影响其他域名）
+
+**⚠️ VPN 全局/系统代理开启时，Sealos（hzh.sealos.run、*.sealoshzh.site）及国内站反而不可达**——kubectl/curl 不走系统代理但 TUN 模式会劫持；操作 Sealos 前先关 VPN 或确认 sealos 域名走直连规则。
+
+## 九、安全提醒
 
 - 仓库当前为 **public**，早期 DEPLOY.md 中的密钥已进入 git 历史，建议尽快把仓库设为 private，并在方便时轮换 `NEXTAUTH_SECRET` 与两个加密 key（轮换加密 key 前需先清空已加密的账号 Cookie 数据）。

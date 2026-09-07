@@ -18,6 +18,20 @@ export function getScraperApiUrl(): string {
   return configured.replace(/\/$/, '');
 }
 
+// 自建爬虫为可选 fallback：未配置时返回 undefined 而不是抛错（TikHub 主调足够时用不到）
+function tryGetScraperEndpoint(apiEndpoint?: string): string | undefined {
+  const configured = apiEndpoint?.trim() || process.env.SCRAPER_API_URL?.trim();
+  if (!configured || configured === '/api/scraper') return undefined;
+  return configured.replace(/\/$/, '');
+}
+
+export function getTikHubApiKey(): string | undefined {
+  const key = process.env.TIKHUB_API_KEY?.trim();
+  return key || undefined;
+}
+
+const TIKHUB_API_BASE = 'https://api.tikhub.io';
+
 function buildScraperUrl(endpoint: string, path: string, search: string): string {
   const base = endpoint.replace(/\/$/, '');
   const isProxy = base.endsWith('/api/scraper');
@@ -28,9 +42,9 @@ function buildScraperUrl(endpoint: string, path: string, search: string): string
 // 抓取服务响应可能较慢，统一 60s 超时并给出友好错误
 const SCRAPER_TIMEOUT_MS = 60_000;
 
-async function scraperFetch(url: string): Promise<Response> {
+async function scraperFetch(url: string, headers?: Record<string, string>): Promise<Response> {
   try {
-    return await fetch(url, { method: 'GET', signal: AbortSignal.timeout(SCRAPER_TIMEOUT_MS) });
+    return await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(SCRAPER_TIMEOUT_MS) });
   } catch (error) {
     if ((error as { name?: string })?.name === 'TimeoutError') {
       throw new Error(`抓取服务请求超时（${SCRAPER_TIMEOUT_MS / 1000}s），请稍后重试`);
@@ -236,35 +250,53 @@ export async function scrapeComments(
   return comments;
 }
 
-// 生产环境真实API调用（ Evil0ctal/Douyin_TikTok_Download_API ）
+// 生产环境真实API调用：抖音走「TikHub 主数据源 + 自建爬虫 fallback」，其他平台仍走自建爬虫
+// TikHub 文档: https://tikhub.io/zh/api-reference（接口形态与 Evil0ctal 项目一致）
 export async function scrapeCommentsReal(
   parsedVideo: ParsedVideo,
-  apiEndpoint: string = getScraperApiUrl()
+  apiEndpoint?: string
 ): Promise<ScrapedComment[]> {
-  const endpoint = apiEndpoint.replace(/\/$/, '');
+  const endpoint = tryGetScraperEndpoint(apiEndpoint);
 
-  // 1. 先解析出平台内部视频ID
-  const hybridRes = await scraperFetch(
-    buildScraperUrl(
-      endpoint,
-      '/hybrid/video_data',
-      `?url=${encodeURIComponent(parsedVideo.originalUrl)}`
-    )
-  );
-
-  if (!hybridRes.ok) {
-    throw new Error(`Hybrid API error: ${hybridRes.status}`);
-  }
-
-  const hybridData = await hybridRes.json();
-  const awemeId = hybridData?.data?.aweme_id;
-
-  if (!awemeId) {
-    throw new Error('无法从视频链接解析出 aweme_id');
-  }
-
-  // 2. 拉取评论（抖音）
   if (parsedVideo.platform === 'DOUYIN') {
+    return scrapeDouyinComments(parsedVideo, endpoint);
+  }
+
+  // 其他平台：保持原有 hybrid 路径
+  if (!endpoint) {
+    throw new Error(
+      '未配置抓取服务地址：请将 SCRAPER_API_URL 设置为抓取服务直连地址（如 http://localhost:8000）'
+    );
+  }
+  return scrapeOtherPlatformComments(parsedVideo, endpoint);
+}
+
+// 抖音评论抓取：aweme_id 本地解析优先，评论 TikHub 主调、自建爬虫兜底
+async function scrapeDouyinComments(
+  parsedVideo: ParsedVideo,
+  endpoint?: string
+): Promise<ScrapedComment[]> {
+  const tikhubKey = getTikHubApiKey();
+  if (!tikhubKey && !endpoint) {
+    throw new Error(
+      '未配置评论数据源：请配置 TIKHUB_API_KEY（推荐，tikhub.io 注册获取），' +
+        '或将 SCRAPER_API_URL 设置为自建抓取服务直连地址作为 fallback'
+    );
+  }
+
+  const awemeId = await resolveAwemeId(parsedVideo, endpoint);
+
+  let tikhubError: Error | undefined;
+  if (tikhubKey) {
+    try {
+      return await fetchDouyinCommentsViaTikHub(parsedVideo.videoId, awemeId, tikhubKey);
+    } catch (error) {
+      tikhubError = error as Error;
+      console.warn(`[Scraper] TikHub 评论抓取失败（${tikhubError.message}），尝试自建爬虫 fallback`);
+    }
+  }
+
+  if (endpoint) {
     const commentsRes = await scraperFetch(
       buildScraperUrl(
         endpoint,
@@ -279,30 +311,114 @@ export async function scrapeCommentsReal(
 
     const commentsData = await commentsRes.json();
     const comments = commentsData?.data?.comments || [];
-
-    return comments.map((c: unknown, idx: number) => {
-      const comment = c as {
-        user?: {
-          nickname?: string;
-          avatar_thumb?: { url_list?: string[] };
-          avatar?: { url_list?: string[] };
-        };
-        text?: string;
-        create_time?: number;
-        digg_count?: number;
-      };
-      return {
-        id: `${parsedVideo.videoId}_c${idx}`,
-        authorName: comment.user?.nickname || '未知用户',
-        authorAvatar: comment.user?.avatar_thumb?.url_list?.[0] || comment.user?.avatar?.url_list?.[0] || '',
-        content: comment.text || '',
-        createdAt: comment.create_time ? new Date(comment.create_time * 1000).toISOString() : new Date().toISOString(),
-        likes: comment.digg_count || 0,
-      };
-    });
+    return comments.map((c: unknown, idx: number) => mapDouyinComment(c, parsedVideo.videoId, idx));
   }
 
-  // 其他平台：先尝试 hybrid 返回的 comment_list
+  throw new Error(`TikHub 评论抓取失败且无自建爬虫 fallback：${tikhubError?.message}`);
+}
+
+// aweme_id 解析：数字 ID 直取 → 短链本地 follow 302 → 自建 hybrid 兜底
+async function resolveAwemeId(parsedVideo: ParsedVideo, endpoint?: string): Promise<string> {
+  if (/^\d+$/.test(parsedVideo.videoId)) {
+    return parsedVideo.videoId;
+  }
+
+  // v.douyin.com 短链：普通 GET follow 302 即可拿到最终落地页 URL（非签名接口，任意出口 IP 可用）
+  try {
+    const res = await scraperFetch(parsedVideo.originalUrl);
+    await res.body?.cancel().catch(() => {});
+    const finalUrl = res.url || '';
+    const match = finalUrl.match(/\/video\/(\d+)/) || finalUrl.match(/[?&]modal_id=(\d+)/);
+    if (match) return match[1];
+  } catch {
+    // 落入 hybrid 兜底
+  }
+
+  if (endpoint) {
+    const hybridRes = await scraperFetch(
+      buildScraperUrl(
+        endpoint,
+        '/hybrid/video_data',
+        `?url=${encodeURIComponent(parsedVideo.originalUrl)}`
+      )
+    );
+
+    if (!hybridRes.ok) {
+      throw new Error(`Hybrid API error: ${hybridRes.status}`);
+    }
+
+    const hybridData = await hybridRes.json();
+    const awemeId = hybridData?.data?.aweme_id;
+    if (awemeId) return String(awemeId);
+  }
+
+  throw new Error(`无法从视频链接解析出 aweme_id: ${parsedVideo.originalUrl}`);
+}
+
+// TikHub 主数据源：成功判定 = HTTP 200 且 body code === 200（TikHub 业务错误也可能返回 HTTP 200）
+async function fetchDouyinCommentsViaTikHub(
+  videoId: string,
+  awemeId: string,
+  apiKey: string
+): Promise<ScrapedComment[]> {
+  const res = await scraperFetch(
+    `${TIKHUB_API_BASE}/api/v1/douyin/web/fetch_video_comments?aweme_id=${awemeId}&cursor=0&count=50`,
+    { Authorization: `Bearer ${apiKey}` }
+  );
+
+  if (!res.ok) {
+    throw new Error(`TikHub API error: HTTP ${res.status}`);
+  }
+
+  const body = await res.json();
+  if (body?.code !== 200) {
+    throw new Error(`TikHub API error: code ${body?.code}`);
+  }
+
+  const comments = body?.data?.comments || [];
+  return comments.map((c: unknown, idx: number) => mapDouyinComment(c, videoId, idx));
+}
+
+// 抖音评论字段映射（TikHub 与自建爬虫返回结构一致，共用）
+function mapDouyinComment(c: unknown, videoId: string, idx: number): ScrapedComment {
+  const comment = c as {
+    user?: {
+      nickname?: string;
+      avatar_thumb?: { url_list?: string[] };
+      avatar?: { url_list?: string[] };
+    };
+    text?: string;
+    create_time?: number;
+    digg_count?: number;
+  };
+  return {
+    id: `${videoId}_c${idx}`,
+    authorName: comment.user?.nickname || '未知用户',
+    authorAvatar: comment.user?.avatar_thumb?.url_list?.[0] || comment.user?.avatar?.url_list?.[0] || '',
+    content: comment.text || '',
+    createdAt: comment.create_time ? new Date(comment.create_time * 1000).toISOString() : new Date().toISOString(),
+    likes: comment.digg_count || 0,
+  };
+}
+
+// 快手/视频号等其他平台：hybrid 解析 + comment_list
+async function scrapeOtherPlatformComments(
+  parsedVideo: ParsedVideo,
+  endpoint: string
+): Promise<ScrapedComment[]> {
+  const hybridRes = await scraperFetch(
+    buildScraperUrl(
+      endpoint,
+      '/hybrid/video_data',
+      `?url=${encodeURIComponent(parsedVideo.originalUrl)}`
+    )
+  );
+
+  if (!hybridRes.ok) {
+    throw new Error(`Hybrid API error: ${hybridRes.status}`);
+  }
+
+  const hybridData = await hybridRes.json();
   const comments = hybridData?.data?.comment_list || [];
   return comments.map((c: unknown, idx: number) => {
     const comment = c as {
